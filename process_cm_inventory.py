@@ -1,4 +1,6 @@
 import pandas as pd
+import os
+import sqlite3
 
 def process_cm_inventory():
     df = pd.read_excel('xxx.xlsx')
@@ -21,8 +23,29 @@ def process_cm_inventory():
     df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
     df['Date'] = pd.to_datetime(df['Date'])
 
+    # Save to CSV
     df.to_csv('cm_inventory.csv', index=False, mode='w')
     print('cm_inventory.csv saved')
+
+    # Save to SQLite database
+    # Create data directory if it doesn't exist
+    os.makedirs('data', exist_ok=True)
+    
+    # Connect to SQLite database
+    conn = sqlite3.connect('data/cm_inventory_processed.db')
+    
+    # Create dtype dictionary for all columns except Date
+    dtype_dict = {'Date': 'DATE'}
+    for col in df.columns:
+        if col != 'Date':
+            dtype_dict[col] = 'INTEGER'
+    
+    # Save DataFrame to SQLite with explicit data types
+    df.to_sql('cm_inventory_processed', conn, if_exists='replace', index=False, dtype=dtype_dict)
+    
+    # Close the connection
+    conn.close()
+    print('data/cm_inventory_processed.db saved')
 
 if __name__ == "__main__":
     process_cm_inventory()

@@ -5,28 +5,42 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
 import time
 import pandas as pd
+from process_pms_inventory import process_pms_inventory
+import os
+import sqlite3
+import platform
 
 def setup_driver():
     # Set up Chrome options
     chrome_options = Options()
-    # chrome_options.add_argument('--headless')  # Uncomment to run in headless mode
+    chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1920,1080')
+    
+    # Add specific options for Mac ARM64
+    if platform.system() == 'Darwin' and platform.machine() == 'arm64':
+        chrome_options.binary_location = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     
     # Initialize the Chrome driver
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    driver = webdriver.Chrome(options=chrome_options)
     return driver
 
-def login_to_hospitality_suite():
+def scrape_pms_inventory():
+    """
+    Scrape PMS inventory data from the website
+    """
     driver = setup_driver()
     try:
-        # Navigate to the login page
-        driver.get('https://fo.hospitality.mykg.id/')
+        # Navigate to the website
+        driver.get("https://fo.hospitality.mykg.id/")
+        print("Navigating to Hospitality Suite website...")
+        
+        # Wait for the page to load
+        time.sleep(5)
         
         # Wait for the username field to be present
         username_field = WebDriverWait(driver, 10).until(
@@ -144,18 +158,97 @@ def login_to_hospitality_suite():
         # Create DataFrame
         df = pd.DataFrame(data, columns=headers)
         
-        # Save to CSV, replacing if file exists
-        df.to_csv('pms_inventory.csv', index=False, mode='w')
-        print("Data saved to pms_inventory.csv (replaced existing file if any)")
+        # Convert numeric columns to appropriate types
+        numeric_columns = ['DLK', 'DLT', 'DLKP', 'DLTP', 'PRKG', 'PRKP', 'PRTG', 'PRTP', 'PRKL', 'PRTL',
+                         'Extra Bed', 'Total Room', 'Available', 'Tentative', 'Definite', 'Waiting List', 
+                         'Allotment', 'Out of Order']
+        
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        print("\nScraping completed successfully!")
+        
+        # First save the raw scraped data to CSV
+        df.to_csv('pms_inventory.csv', index=False)
+        print("Raw data saved to pms_inventory.csv")
+        
+        # Save raw data to SQLite database
+        # Create data directory if it doesn't exist
+        os.makedirs('data', exist_ok=True)
+        
+        # Connect to SQLite database (this will create it if it doesn't exist)
+        conn = sqlite3.connect('data/pms_inventory_raw.db')
+        
+        # Define data types for each column
+        dtype_dict = {
+            'Date': 'DATE',
+            'AVR': 'INTEGER',
+            'AVS': 'INTEGER',
+            'ASP': 'INTEGER',
+            'ASW': 'INTEGER',
+            'AVP': 'INTEGER',
+            'BFS': 'INTEGER',
+            'DLK': 'INTEGER',
+            'DLT': 'INTEGER',
+            'DLKP': 'INTEGER',
+            'DLTP': 'INTEGER',
+            'DLS': 'INTEGER',
+            'FAM': 'INTEGER',
+            'PRKG': 'INTEGER',
+            'PRKP': 'INTEGER',
+            'PRTG': 'INTEGER',
+            'PRTP': 'INTEGER',
+            'PRKL': 'INTEGER',
+            'PRTL': 'INTEGER',
+            'PSU': 'INTEGER',
+            'Extra Bed': 'INTEGER',
+            'Total Room': 'INTEGER',
+            'Available': 'INTEGER',
+            'Tentative': 'INTEGER',
+            'Definite': 'INTEGER',
+            'Waiting List': 'INTEGER',
+            'Allotment': 'INTEGER',
+            'Out of Order': 'INTEGER'
+        }
+        
+        # Save DataFrame to SQLite with explicit data types
+        df.to_sql('pms_inventory', conn, if_exists='replace', index=False, dtype=dtype_dict)
+        
+        # Close the connection
+        conn.close()
+        print("Raw data saved to data/pms_inventory_raw.db")
+        
+        # Then process the inventory data using the same function as process_pms_inventory.py
+        print("\nStarting inventory data processing...")
+        processed_df = process_pms_inventory(df)
+        print("Inventory data processing completed!")
+        
+        return processed_df
         
     except Exception as e:
         print(f"An error occurred: {str(e)}")
+        return None
     finally:
-        # Keep the browser open for inspection
-        # input("Press Enter to close the browser...")
-        # driver.quit()
         driver.quit()
         print("Browser closed")
 
+def main():
+    """
+    Main function to run the scraping and processing sequence
+    """
+    print("=== Starting PMS Inventory Scraping and Processing ===")
+    print("Step 1: Scraping data from Hospitality Suite...")
+    processed_data = scrape_pms_inventory()
+    
+    if processed_data is not None:
+        print("\n=== Process Completed Successfully ===")
+        print("1. Data scraped from Hospitality Suite")
+        print("2. Raw data saved to pms_inventory.csv")
+        print("3. Data processed and saved to pms_inventory_processed.csv")
+    else:
+        print("\n=== Process Failed ===")
+        print("Please check the error messages above.")
+
 if __name__ == "__main__":
-    login_to_hospitality_suite() 
+    main() 
