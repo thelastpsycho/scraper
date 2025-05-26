@@ -117,11 +117,13 @@ def wait_for_table_load(driver, timeout=20):
 def setup_driver():
     # Set up Chrome options
     chrome_options = Options()
-    # chrome_options.add_argument('--headless=new')
+    chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     chrome_options.add_argument('--start-maximized')
+    chrome_options.add_argument('--disable-gpu')  # Required for headless on some systems
+    chrome_options.add_argument('--disable-software-rasterizer')  # Better performance in headless
     
     # Add specific options for Mac ARM64
     if platform.system() == 'Darwin' and platform.machine() == 'arm64':
