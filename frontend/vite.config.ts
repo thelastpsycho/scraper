@@ -8,7 +8,8 @@ export default defineConfig({
     host: '0.0.0.0', // Listen on all addresses
     hmr: {
       clientPort: 5173, // Force client to use this port
-      host: 'localhost' // Keep host as localhost
+      host: '0.0.0.0', // Change this from 'localhost' to '0.0.0.0'
+      protocol: 'ws'
     },
     proxy: {
       '/api': {
