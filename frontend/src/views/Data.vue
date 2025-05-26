@@ -575,6 +575,7 @@ const fetchData = async () => {
         // Add special cases
         tooltipMappings['Date'] = 'Date'
         tooltipMappings['Occ%'] = 'Occupancy'
+        tooltipMappings['DLX+Pre'] = 'Deluxe + Premiere Combined'
 
         // Process each field in the row
         Object.keys(row).forEach(key => {
@@ -588,6 +589,11 @@ const fetchData = async () => {
           }
         })
 
+        // Add DLX+Pre calculation
+        const dlx = Number(newRow['DLX']) || 0
+        const pre = Number(newRow['PRE']) || 0
+        newRow['DLX+Pre'] = dlx + pre
+
         return newRow
       })
       if (combinedData.value.length > 0) {
@@ -597,6 +603,7 @@ const fetchData = async () => {
           'Occ%',
           'DLX',
           'PRE',
+          'DLX+Pre',  // Add the new combined column
           'DLP',
           'PKL',
           'FPK',
@@ -649,6 +656,7 @@ const fetchData = async () => {
         })
         tooltipMappings['Date'] = 'Date'
         tooltipMappings['Occ%'] = 'Occupancy'
+        tooltipMappings['DLX+Pre'] = 'Deluxe + Premiere Combined'
         tooltipMappingsRef.value = tooltipMappings
       }
     }
