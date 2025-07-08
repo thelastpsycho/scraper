@@ -25,7 +25,7 @@ def get_db_connection(db_name):
         logging.error(f"Error connecting to database {db_name}: {str(e)}")
         raise
 
-@bp.route('/api/db/combined-inventory', methods=['GET'])
+@bp.route('/api/db/combined-inventory', methods=['GET', 'OPTIONS'])
 def get_combined_inventory():
     try:
         conn = get_db_connection('combined_inventory.db')
@@ -45,7 +45,7 @@ def get_combined_inventory():
         logging.error(f"Unexpected error in get_combined_inventory: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@bp.route('/api/db/inventory-allocation', methods=['GET'])
+@bp.route('/api/db/inventory-allocation', methods=['GET', 'OPTIONS'])
 def get_inventory_allocation():
     try:
         conn = get_db_connection('inventory_allocation.db')
@@ -65,7 +65,7 @@ def get_inventory_allocation():
         logging.error(f"Unexpected error in get_inventory_allocation: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@bp.route('/api/db/pms-inventory-processed', methods=['GET'])
+@bp.route('/api/db/pms-inventory-processed', methods=['GET', 'OPTIONS'])
 def get_pms_inventory_processed():
     try:
         conn = get_db_connection('pms_inventory_processed.db')
@@ -85,7 +85,7 @@ def get_pms_inventory_processed():
         logging.error(f"Unexpected error in get_pms_inventory_processed: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@bp.route('/api/db/pms-inventory-raw', methods=['GET'])
+@bp.route('/api/db/pms-inventory-raw', methods=['GET', 'OPTIONS'])
 def get_pms_inventory_raw():
     try:
         conn = get_db_connection('pms_inventory_raw.db')
