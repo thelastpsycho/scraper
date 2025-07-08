@@ -352,6 +352,6 @@ const exportData = async (type: string, format: 'csv' | 'excel' | 'json') => {
 }
 
 onMounted(() => {
-  fetchData();
+  // fetchData();
 });
 </script>
