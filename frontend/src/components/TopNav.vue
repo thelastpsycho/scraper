@@ -1,52 +1,35 @@
 <template>
-  <nav class="bg-white border-b border-gray-200 fixed w-full z-30">
-    <div class="w-full px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between h-16">
-        <!-- Left side -->
+  <nav class="bg-app-primary shadow-sm fixed w-full z-30">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between h-20">
+        <!-- Left side: Logo and Title -->
         <div class="flex items-center">
           <div class="flex-shrink-0 flex items-center">
-            <h1 class="text-xl font-bold text-gray-800">Scraper Dashboard</h1>
-          </div>
-          <!-- Desktop Navigation -->
-          <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-            <router-link 
-              to="/" 
-              class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-              active-class="border-indigo-500 text-gray-900"
-            >
-              Dashboard
-            </router-link>
-            <router-link 
-              to="/scraping" 
-              class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-              active-class="border-indigo-500 text-gray-900"
-            >
-              Scraping
-            </router-link>
-            <router-link 
-              to="/data" 
-              class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-              active-class="border-indigo-500 text-gray-900"
-            >
-              Data
-            </router-link>
-            <router-link 
-              to="/yielder" 
-              class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium"
-              active-class="border-indigo-500 text-gray-900"
-            >
-              Yielder
-            </router-link>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-auto text-app-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h1 class="text-2xl font-bold text-app-tertiary ml-3">Scraper</h1>
           </div>
         </div>
 
-        <!-- Right side -->
-        <div class="flex items-center">
-          <!-- Mobile menu button -->
-          <button 
-            @click="isMobileMenuOpen = !isMobileMenuOpen"
-            class="sm:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+        <!-- Center: Desktop Navigation -->
+        <div class="hidden sm:ml-6 sm:flex sm:items-center sm:space-x-2">
+          <router-link v-for="item in navigation" :key="item.name" :to="item.href" 
+            :class="[
+              route.path === item.href 
+                ? 'bg-app-secondary text-app-accent'
+                : 'text-app-tertiary hover:bg-app-secondary/60 hover:text-app-accent',
+              'px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center'
+            ]"
           >
+            <component :is="item.icon" class="h-5 w-5 mr-2" />
+            {{ item.name }}
+          </router-link>
+        </div>
+
+        <!-- Right side: Mobile menu button -->
+        <div class="flex items-center sm:hidden">
+          <button @click="isMobileMenuOpen = !isMobileMenuOpen" class="inline-flex items-center justify-center p-2 rounded-md text-app-tertiary hover:bg-app-secondary focus:outline-none">
             <span class="sr-only">Open main menu</span>
             <Bars3Icon v-if="!isMobileMenuOpen" class="block h-6 w-6" aria-hidden="true" />
             <XMarkIcon v-else class="block h-6 w-6" aria-hidden="true" />
@@ -56,46 +39,20 @@
     </div>
 
     <!-- Mobile menu -->
-    <div 
-      v-show="isMobileMenuOpen" 
-      class="sm:hidden"
-    >
-      <div class="pt-2 pb-3 space-y-1">
-        <router-link 
-          to="/" 
-          class="block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
-          :class="[route.path === '/' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700']"
+    <div v-show="isMobileMenuOpen" class="sm:hidden bg-app-primary border-t border-app-secondary">
+      <div class="px-2 pt-2 pb-3 space-y-1">
+        <router-link v-for="item in navigation" :key="item.name" :to="item.href" 
+          @click="isMobileMenuOpen = false"
+          :class="[
+            route.path === item.href 
+              ? 'bg-app-secondary text-app-accent' 
+              : 'text-app-tertiary hover:bg-app-secondary/60 hover:text-app-accent',
+            'block px-3 py-2 rounded-md text-base font-medium flex items-center'
+          ]"
         >
-          Dashboard
+          <component :is="item.icon" class="h-6 w-6 mr-3" />
+          {{ item.name }}
         </router-link>
-        <router-link 
-          to="/scraping" 
-          class="block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
-          :class="[route.path === '/scraping' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700']"
-        >
-          Scraping
-        </router-link>
-        <router-link 
-          to="/data" 
-          class="block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
-          :class="[route.path === '/data' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700']"
-        >
-          Data
-        </router-link>
-        <router-link 
-          to="/yielder" 
-          class="block pl-3 pr-4 py-2 border-l-4 text-base font-medium"
-          :class="[route.path === '/yielder' ? 'border-indigo-500 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700']"
-        >
-          Yielder
-        </router-link>
-      </div>
-      <div class="pt-4 pb-3 border-t border-gray-200">
-        <div class="px-4">
-          <button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-            Start Scraping
-          </button>
-        </div>
       </div>
     </div>
   </nav>
@@ -104,8 +61,24 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
+import {
+  Bars3Icon,
+  XMarkIcon,
+  HomeIcon,
+  DocumentTextIcon,
+  CircleStackIcon,
+  ChartBarIcon,
+  ChatBubbleLeftRightIcon
+} from '@heroicons/vue/24/outline'
 
 const route = useRoute()
 const isMobileMenuOpen = ref(false)
-</script> 
+
+const navigation = [
+  { name: 'Dashboard', href: '/', icon: HomeIcon },
+  { name: 'Scraping', href: '/scraping', icon: DocumentTextIcon },
+  { name: 'Data', href: '/data', icon: CircleStackIcon },
+  { name: 'Yielder', href: '/yielder', icon: ChartBarIcon },
+  { name: 'Chat', href: '/chat', icon: ChatBubbleLeftRightIcon },
+]
+</script>

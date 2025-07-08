@@ -351,7 +351,7 @@ def scrape_pms_inventory(start_date=None):
         
         # Add longer wait time for table to fully load
         print("Waiting for table to fully load...")
-        time.sleep(20)  # Wait 20 seconds for full table load
+        time.sleep(6)  # Wait 6 seconds for full table load
         
         # Wait for table to load with more detailed status updates
         table = wait_for_table_load(driver)

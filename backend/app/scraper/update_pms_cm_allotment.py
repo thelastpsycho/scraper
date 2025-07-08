@@ -15,13 +15,19 @@ from selenium.webdriver.common.keys import Keys
 from ..shared import log_queue
 
 def wait_for_toast_disappear(driver, timeout=10):
-    """Wait for toast notifications to disappear"""
+    """Wait for toast message to disappear"""
     try:
+        # Wait for toast to appear
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "toast-message"))
+        )
+        # Wait for toast to disappear
         WebDriverWait(driver, timeout).until_not(
             EC.presence_of_element_located((By.CLASS_NAME, "toast-message"))
         )
-    except:
-        pass  # No toast found or already disappeared
+        return True
+    except TimeoutException:
+        return False
 
 def wait_for_page_load(driver, timeout=10):
     """Wait for page to finish loading"""
@@ -74,7 +80,7 @@ def wait_and_click(driver, by, value, timeout=10, description="element"):
 def setup_driver():
     # Set up Chrome options
     chrome_options = Options()
-    chrome_options.add_argument('--headless=new')
+    # chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -106,6 +112,131 @@ def log(driver, message, type='info'):
         })
     except Exception as e:
         print(f"Could not send log to queue: {e}")
+
+def add_date_range(driver, start_date, end_date):
+    """Add a date range to the form"""
+    log(driver, f"Adding date range: {start_date} to {end_date}")
+    
+    # Set start date
+    start_date_input = wait_for_element_presence(driver, By.ID, "txtStartDate", description="start date input")
+    if not start_date_input:
+        raise Exception("Could not find start date input field")
+    
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_date_input)
+    time.sleep(0.5)
+    
+    # Clear and set start date value directly first
+    driver.execute_script("arguments[0].value = '';", start_date_input)
+    time.sleep(0.5)
+    
+    # Set the start date value
+    log(driver, f"Setting start date value to: {start_date}")
+    driver.execute_script(f"arguments[0].value = '{start_date}';", start_date_input)
+    time.sleep(0.5)
+    
+    # Verify start date was set
+    start_date_value = start_date_input.get_attribute('value')
+    log(driver, f"Start date value after setting: {start_date_value}")
+    
+    # Parse the start date
+    start_date_obj = datetime.strptime(start_date, '%m/%d/%Y')
+    start_day = str(start_date_obj.day)
+    
+    # Set end date
+    end_date_input = wait_for_element_presence(driver, By.ID, "txtEndDate", description="end date input")
+    if not end_date_input:
+        raise Exception("Could not find end date input field")
+    
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", end_date_input)
+    time.sleep(0.5)
+    
+    # Clear and set end date value directly first
+    driver.execute_script("arguments[0].value = '';", end_date_input)
+    time.sleep(0.5)
+    
+    # Set the end date value
+    log(driver, f"Setting end date value to: {end_date}")
+    driver.execute_script(f"arguments[0].value = '{end_date}';", end_date_input)
+    time.sleep(0.5)
+    
+    # Verify end date was set
+    end_date_value = end_date_input.get_attribute('value')
+    log(driver, f"End date value after setting: {end_date_value}")
+    
+    # Parse the end date
+    end_date_obj = datetime.strptime(end_date, '%m/%d/%Y')
+    end_day = str(end_date_obj.day)
+    
+    # Wait a moment to ensure dates are properly set
+    time.sleep(1)
+    
+    # Verify both dates are set correctly before proceeding
+    final_start_date = start_date_input.get_attribute('value')
+    final_end_date = end_date_input.get_attribute('value')
+    
+    log(driver, f"Final start date: {final_start_date}")
+    log(driver, f"Final end date: {final_end_date}")
+    
+    if not final_start_date or not final_end_date:
+        # Try setting the dates one more time if they were cleared
+        if not final_start_date:
+            driver.execute_script(f"arguments[0].value = '{start_date}';", start_date_input)
+            time.sleep(0.5)
+        if not final_end_date:
+            driver.execute_script(f"arguments[0].value = '{end_date}';", end_date_input)
+            time.sleep(0.5)
+        
+        # Check one final time
+        final_start_date = start_date_input.get_attribute('value')
+        final_end_date = end_date_input.get_attribute('value')
+        
+        if not final_start_date or not final_end_date:
+            raise Exception(f"Failed to set dates correctly. Start: {final_start_date} (expected {start_date}), End: {final_end_date} (expected {end_date})")
+    
+    # Click Add Date button
+    add_date_button = wait_for_element_presence(driver, By.ID, "ModalAddRoomAddDateButton", description="Add Date button")
+    if not add_date_button:
+        raise Exception("Could not find Add Date button")
+    
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", add_date_button)
+    time.sleep(0.5)
+    
+    try:
+        add_date_button.click()
+    except:
+        driver.execute_script("arguments[0].click();", add_date_button)
+    
+    # Wait for the new date range to be added and verify it was added
+    time.sleep(1)
+    log(driver, "Successfully added date range")
+
+def handle_sweet_alert(driver, timeout=10):
+    """Handle sweet alert dialog"""
+    try:
+        # Wait for sweet alert to appear
+        alert = WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "swal2-container"))
+        )
+        
+        # Get alert message
+        message_element = alert.find_element(By.CLASS_NAME, "swal2-html-container")
+        message = message_element.text if message_element else "No message found"
+        log(driver, f"Sweet alert message: {message}")
+        
+        # Find and click the confirm button
+        confirm_button = alert.find_element(By.CLASS_NAME, "swal2-confirm")
+        if confirm_button:
+            confirm_button.click()
+            time.sleep(1)
+            return True
+            
+        return False
+    except TimeoutException:
+        log(driver, "No sweet alert found within timeout period")
+        return False
+    except Exception as e:
+        log(driver, f"Error handling sweet alert: {str(e)}")
+        return False
 
 def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13"):
     """
@@ -281,73 +412,16 @@ def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13")
         wait_for_page_load(driver)
         log(driver, "Successfully navigated to allotment detail page")
         
-        # Click Add Allotment Room button to open modal
-        log(driver, "Clicking Add Allotment Room button...")
-        if not wait_and_click(driver, By.ID, "btnAddRoom", description="Add Allotment Room button"):
-            raise Exception("Failed to click Add Allotment Room button")
-            
-        # Wait for modal to appear
-        log(driver, "Waiting for modal to appear...")
-        modal = wait_for_element_presence(driver, By.ID, "modalAddRoom", timeout=15, description="Add Room modal")
-        if not modal:
-            log(driver, "Modal did not appear after clicking Add Allotment Room button")
-            raise Exception("Modal did not appear after clicking Add Allotment Room button")
-        log(driver, "Successfully opened Add Room modal")
-        # Add a short sleep to allow modal animation to finish
-        time.sleep(1)
-        # Wait for modal to be fully loaded and visible
-        log(driver, "Waiting for modal to be fully loaded (visible)...")
-        try:
-            # Increase timeout to 30 seconds
-            WebDriverWait(driver, 30).until(
-                EC.visibility_of_element_located((By.ID, "txtStartDate"))
-            )
-            log(driver, "Modal is fully loaded and visible")
-        except TimeoutException:
-            log(driver, "Modal did not become visible within timeout period, trying to refresh page...")
-            # Try to refresh the page and wait for it to load
-            driver.refresh()
-            wait_for_page_load(driver)
-            time.sleep(2)  # Add a small delay after refresh
-            
-            # Try clicking the Add Allotment Room button again
-            log(driver, "Retrying to click Add Allotment Room button...")
-            add_button = wait_for_element_presence(driver, By.ID, "btnAddRoom", description="Add Allotment Room button")
-            if add_button:
-                try:
-                    add_button.click()
-                except:
-                    driver.execute_script("arguments[0].click();", add_button)
-                
-                # Wait again for modal with increased timeout
-                try:
-                    WebDriverWait(driver, 30).until(
-                        EC.visibility_of_element_located((By.ID, "txtStartDate"))
-                    )
-                    log(driver, "Modal is now visible after retry")
-                except TimeoutException:
-                    log(driver, "Modal still not visible after retry")
-                    raise Exception("Modal did not become visible after retry")
-            else:
-                raise Exception("Could not find Add Allotment Room button after refresh")
-        
-        # Scroll modal into view
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", modal)
-        time.sleep(1)  # Increased wait time for scroll to complete
-        
         # Read and process CSV data
         log(driver, "Reading CSV data...")
-        # Store dates and their inventory values
         date_inventory = []
         try:
-            # Use the correct path to the CSV file
             csv_path = os.path.join(os.path.dirname(__file__), 'data/daily_inventory_allocation_seasonal.csv')
             log(driver, f"Attempting to open CSV file at: {csv_path}")
             
             with open(csv_path, 'r') as file:
                 csv_reader = csv.DictReader(file)
                 for row in csv_reader:
-                    # Convert date from YYYY-MM-DD to MM/DD/YYYY
                     date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
                     formatted_date = date_obj.strftime('%m/%d/%Y')
                     date_inventory.append({
@@ -376,357 +450,98 @@ def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13")
         if current_group:
             groups.append(current_group)
         log(driver, f"Created {len(groups)} groups of consecutive dates")
-            
-        # Process each group
+        
+        # Process each group with correct batching logic
+        log(driver, "Processing date ranges in batches of 5 within each inventory group...")
         for group_index, group in enumerate(groups):
-            # Before starting the next group, ensure no lingering sweet alert
-            try:
-                WebDriverWait(driver, 3).until(
-                    EC.invisibility_of_element_located((By.CLASS_NAME, "sweet-alert"))
-                )
-                log(driver, "No lingering sweet alert before starting next group")
-            except TimeoutException:
-                log(driver, "Lingering sweet alert detected, trying to close it")
-                try:
-                    ok_button = wait_for_element_presence(driver, By.CLASS_NAME, "confirm", description="sweet alert OK button")
-                    if ok_button:
-                        ok_button.click()
-                        log(driver, "Clicked lingering OK on sweet alert")
-                        WebDriverWait(driver, 5).until(
-                            EC.invisibility_of_element_located((By.CLASS_NAME, "sweet-alert"))
-                        )
-                except Exception as e:
-                    log(driver, f"Failed to close lingering sweet alert: {e}")
-            
-            log(driver, f"\nProcessing group {group_index + 1} of {len(groups)}")
-            log(driver, f"Date range: {group[0]['date']} to {group[-1]['date']}")
-            
-            # Set start date
-            log(driver, "Setting start date...")
-            start_date_input = wait_for_element_presence(driver, By.ID, "txtStartDate", description="start date input")
-            if not start_date_input:
-                log(driver, "Could not find start date input field")
-                raise Exception("Could not find start date input field")
-            log(driver, f"Start date input found. Displayed: {start_date_input.is_displayed()}, Enabled: {start_date_input.is_enabled()}")
-            
-            # Scroll the modal into view first
-            modal = driver.find_element(By.ID, "modalAddRoom")
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", modal)
-            time.sleep(0.5)  # Wait for scroll to complete
-            
-            # Try to make the input visible and interactable
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_date_input)
-            time.sleep(0.5)  # Wait for scroll to complete
-            
-            # Try to click the input first to ensure it's focused
-            try:
-                start_date_input.click()
-            except:
-                log(driver, "Could not click start date input, trying JavaScript click")
-                driver.execute_script("arguments[0].click();", start_date_input)
-            
-            time.sleep(0.5)  # Wait for click to register
-            
-            # Clear and set the date
-            start_date_input.clear()
-            start_date_input.send_keys(group[0]['date'])
-            start_date_input.send_keys(Keys.TAB)  # Close datepicker
-            log(driver, f"Set start date to {group[0]['date']}")
-            
-            # Set end date
-            log(driver, "Setting end date...")
-            end_date_input = wait_for_element_presence(driver, By.ID, "txtEndDate", description="end date input")
-            if not end_date_input:
-                log(driver, "Could not find end date input field")
-                raise Exception("Could not find end date input field")
-            log(driver, f"End date input found. Displayed: {end_date_input.is_displayed()}, Enabled: {end_date_input.is_enabled()}")
-            
-            # Try to make the input visible and interactable
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", end_date_input)
-            time.sleep(0.5)  # Wait for scroll to complete
-            
-            # Try to click the input first to ensure it's focused
-            try:
-                end_date_input.click()
-            except:
-                log(driver, "Could not click end date input, trying JavaScript click")
-                driver.execute_script("arguments[0].click();", end_date_input)
-            
-            time.sleep(0.5)  # Wait for click to register
-            
-            # Clear and set the date
-            end_date_input.clear()
-            # If single date, use same as start date
-            if len(group) == 1:
-                end_date_input.send_keys(group[0]['date'])
-                end_date_input.send_keys(Keys.TAB)  # Close datepicker
-                log(driver, f"Set end date to {group[0]['date']} (single date)")
-            else:
-                end_date_input.send_keys(group[-1]['date'])
-                end_date_input.send_keys(Keys.TAB)  # Close datepicker
-                log(driver, f"Set end date to {group[-1]['date']}")
-                
-            # Select Deluxe room type (value='DLT')
-            log(driver, "Selecting Deluxe room type...")
-            deluxe_checkbox = wait_for_element_presence(driver, By.XPATH, "//input[@type='checkbox' and @id='lstRoomType' and @value='DLT']", description="Deluxe room type checkbox")
-            if not deluxe_checkbox:
-                log(driver, "Could not find Deluxe room type checkbox (DLT)")
-                raise Exception("Could not find Deluxe room type checkbox (DLT)")
-            log(driver, f"Deluxe checkbox found. Displayed: {deluxe_checkbox.is_displayed()}, Enabled: {deluxe_checkbox.is_enabled()}")
-            try:
-                WebDriverWait(driver, 10).until(EC.visibility_of(deluxe_checkbox))
-                log(driver, "Deluxe checkbox is now visible")
-            except TimeoutException:
-                log(driver, "Deluxe checkbox did not become visible, trying JavaScript click")
-            driver.execute_script("arguments[0].scrollIntoView(true);", deluxe_checkbox)
-            time.sleep(0.5)
-            try:
-                if not deluxe_checkbox.is_selected():
-                    deluxe_checkbox.click()
-                    log(driver, "Clicked Deluxe checkbox using normal click")
-            except Exception as e:
-                log(driver, f"Normal click failed: {str(e)}, trying JavaScript click")
-                try:
-                    driver.execute_script("arguments[0].click();", deluxe_checkbox)
-                    log(driver, "Clicked Deluxe checkbox using JavaScript")
-                except Exception as e:
-                    log(driver, f"JavaScript click failed: {str(e)}, trying to set checked property")
-                    try:
-                        driver.execute_script("arguments[0].checked = true;", deluxe_checkbox)
-                        log(driver, "Set Deluxe checkbox checked property")
-                    except Exception as e:
-                        log(driver, f"All click attempts failed: {str(e)}")
-                        raise Exception("Could not interact with Deluxe checkbox")
-            if deluxe_checkbox.is_selected():
-                log(driver, "Successfully selected Deluxe room type")
-            else:
-                log(driver, "Warning: Deluxe checkbox may not be selected")
-            
-            # Fast tick for Deluxe Twin room type (value='DLT')
-            log(driver, "Ticking Deluxe Twin room type (fast)...")
-            deluxe_twin_checkbox = wait_for_element_presence(
-                driver, By.XPATH, "//input[@type='checkbox' and @id='lstRoomType' and @value='DLT']",
-                description="Deluxe Twin room type checkbox"
-            )
-            if not deluxe_twin_checkbox:
-                log(driver, "Could not find Deluxe Twin room type checkbox (DLT)")
-                raise Exception("Could not find Deluxe Twin room type checkbox (DLT)")
-            if not deluxe_twin_checkbox.is_selected():
-                driver.execute_script("arguments[0].checked = true;", deluxe_twin_checkbox)
-                log(driver, "Deluxe Twin checkbox ticked via JS")
-            else:
-                log(driver, "Deluxe Twin checkbox already ticked")
-            
-            # Set number of rooms from inventory
-            log(driver, "Setting number of rooms...")
-            number_of_rooms = wait_for_element_presence(driver, By.ID, "txtNumberOfRoom", description="number of rooms input")
-            if not number_of_rooms:
-                log(driver, "Could not find number of rooms input field")
-                raise Exception("Could not find number of rooms input field")
-            log(driver, f"Number of rooms input found. Displayed: {number_of_rooms.is_displayed()}, Enabled: {number_of_rooms.is_enabled()}")
-            driver.execute_script("arguments[0].scrollIntoView(true);", number_of_rooms)
-            time.sleep(0.2)
-            number_of_rooms.clear()
-            number_of_rooms.send_keys(str(group[0]['inventory']))
-            log(driver, f"Set number of rooms to {group[0]['inventory']}")
-            
-            # Add remark
-            log(driver, "Adding remark...")
-            remark_textarea = wait_for_element_presence(driver, By.ID, "txtRemarkAllotment", description="remark textarea")
-            if not remark_textarea:
-                log(driver, "Could not find remark textarea")
-                raise Exception("Could not find remark textarea")
-            log(driver, f"Remark textarea found. Displayed: {remark_textarea.is_displayed()}, Enabled: {remark_textarea.is_enabled()}")
-            driver.execute_script("arguments[0].scrollIntoView(true);", remark_textarea)
-            time.sleep(0.2)
-            remark_textarea.clear()
-            if len(group) == 1:
-                remark_textarea.send_keys(f"Updated from CSV data - Deluxe Online Inventory for {group[0]['date']}")
-            else:
-                remark_textarea.send_keys(f"Updated from CSV data - Deluxe Online Inventory for {group[0]['date']} to {group[-1]['date']}")
-            log(driver, "Added remark")
-                
-            log(driver, f"Filled form for dates {group[0]['date']} to {group[-1]['date']} with inventory {group[0]['inventory']}")
-            
-            # Click Save button
-            log(driver, "Clicking Save button...")
-            save_button = wait_for_element_presence(driver, By.ID, "btnSaveRoomAllotment", description="save button")
-            if not save_button:
-                log(driver, "Could not find save button")
-                raise Exception("Could not find save button")
-            log(driver, f"Save button found. Displayed: {save_button.is_displayed()}, Enabled: {save_button.is_enabled()}")
-            driver.execute_script("arguments[0].scrollIntoView(true);", save_button)
-            time.sleep(0.2)
-            save_button.click()
-            log(driver, "Clicked Save button")
-            time.sleep(1)  # Increased wait time for sweet alert
-            
-            # Wait for sweet alert to appear and click OK
-            log(driver, "Waiting for sweet alert...")
-            try:
-                # Wait for sweet alert to be visible
-                WebDriverWait(driver, 10).until(
-                    EC.visibility_of_element_located((By.CLASS_NAME, "sweet-alert"))
-                )
-                log(driver, "Sweet alert appeared")
-                
-                # Wait for OK button to be clickable
-                ok_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.CLASS_NAME, "confirm"))
-                )
-                log(driver, "Found OK button in sweet alert")
-                
-                # Try to click OK button
-                try:
-                    ok_button.click()
-                except:
-                    log(driver, "Could not click OK button normally, trying JavaScript click")
-                    driver.execute_script("arguments[0].click();", ok_button)
-                
-                log(driver, "Clicked OK on sweet alert")
-                
-                # Wait for sweet alert to disappear
-                WebDriverWait(driver, 10).until(
-                    EC.invisibility_of_element_located((By.CLASS_NAME, "sweet-alert"))
-                )
-                log(driver, "Sweet alert disappeared")
-                
-                # Wait for the modal to close
-                try:
-                    WebDriverWait(driver, 10).until(
-                        EC.invisibility_of_element_located((By.ID, "modalAddRoom"))
-                    )
-                    log(driver, "Modal closed automatically")
-                except TimeoutException:
-                    log(driver, "Modal did not close automatically, trying to close it manually")
-                    try:
-                        # Try to find and click the close button
-                        close_btn = driver.find_element(By.CSS_SELECTOR, '#modalAddRoom .close')
-                        driver.execute_script("arguments[0].click();", close_btn)
-                        log(driver, "Clicked modal close button")
-                        
-                        # Wait for modal to close
-                        WebDriverWait(driver, 5).until(
-                            EC.invisibility_of_element_located((By.ID, "modalAddRoom"))
-                        )
-                        log(driver, "Modal closed after manual close attempt")
-                    except Exception as e:
-                        log(driver, f"Failed to close modal manually: {str(e)}")
-                        # Try ESC key as last resort
-                        try:
-                            driver.switch_to.active_element.send_keys(Keys.ESCAPE)
-                            log(driver, "Sent ESCAPE to close modal")
-                            time.sleep(1)
-                        except Exception as e:
-                            log(driver, f"Failed to close modal with ESC: {str(e)}")
-                
-                # Wait for save to complete (toast)
-                log(driver, "Waiting for save confirmation...")
-                wait_for_toast_disappear(driver)
-                log(driver, "Successfully saved allotment room data")
-                
-                # Wait for the Add Allotment Room button to be clickable again
-                try:
-                    WebDriverWait(driver, 15).until(
-                        EC.element_to_be_clickable((By.ID, "btnAddRoom"))
-                    )
-                    log(driver, "Add Allotment Room button is clickable again")
-                except TimeoutException:
-                    log(driver, "Add Allotment Room button did not become clickable, continuing anyway")
-                
-                # Wait a bit before next save
-                log(driver, "Waiting before next save...")
-                time.sleep(2)  # Increased wait time
-                
-                # Click Add Allotment Room button again for next group
-                log(driver, "Clicking Add Allotment Room button for next group...")
-                add_button = wait_for_element_presence(driver, By.ID, "btnAddRoom", description="Add Allotment Room button")
-                if not add_button:
-                    log(driver, "Could not find Add Allotment Room button")
-                    raise Exception("Could not find Add Allotment Room button")
-                
-                # Ensure button is clickable
-                try:
-                    WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.ID, "btnAddRoom"))
-                    )
-                except TimeoutException:
-                    log(driver, "Add Allotment Room button not clickable, trying JavaScript click")
-                
-                # Try to click the button
-                try:
-                    add_button.click()
-                except:
-                    log(driver, "Could not click Add Allotment Room button normally, trying JavaScript click")
-                    driver.execute_script("arguments[0].click();", add_button)
-                
+            log(driver, f"\nProcessing inventory group {group_index + 1} of {len(groups)} (inventory: {group[0]['inventory']})")
+            # Split this group into batches of 5 date ranges
+            for batch_start in range(0, len(group), 5):
+                batch = group[batch_start:batch_start+5]
+                log(driver, f"  Processing batch {batch_start//5 + 1} of {(len(group) + 4)//5} in this group")
+                # Click Add Allotment Room button to open modal
+                if not wait_and_click(driver, By.ID, "btnAddRoom", description="Add Allotment Room button"):
+                    raise Exception("Failed to click Add Allotment Room button")
                 # Wait for modal to appear
-                log(driver, "Waiting for modal to appear...")
                 modal = wait_for_element_presence(driver, By.ID, "modalAddRoom", timeout=15, description="Add Room modal")
                 if not modal:
-                    log(driver, "Modal did not appear after clicking Add Allotment Room button")
                     raise Exception("Modal did not appear after clicking Add Allotment Room button")
-                log(driver, "Successfully opened Add Room modal")
-                
-                # Add a short sleep to allow modal animation to finish
-                time.sleep(1)
-                
-                # Wait for modal to be fully loaded and visible
-                log(driver, "Waiting for modal to be fully loaded (visible)...")
-                try:
-                    # Increase timeout to 30 seconds
-                    WebDriverWait(driver, 30).until(
-                        EC.visibility_of_element_located((By.ID, "txtStartDate"))
-                    )
-                    log(driver, "Modal is fully loaded and visible")
-                except TimeoutException:
-                    log(driver, "Modal did not become visible within timeout period, trying to refresh page...")
-                    # Try to refresh the page and wait for it to load
-                    driver.refresh()
-                    wait_for_page_load(driver)
-                    time.sleep(2)  # Add a small delay after refresh
-                    
-                    # Try clicking the Add Allotment Room button again
-                    log(driver, "Retrying to click Add Allotment Room button...")
-                    add_button = wait_for_element_presence(driver, By.ID, "btnAddRoom", description="Add Allotment Room button")
-                    if add_button:
-                        try:
-                            add_button.click()
-                        except:
-                            driver.execute_script("arguments[0].click();", add_button)
-                        
-                        # Wait again for modal with increased timeout
-                        try:
-                            WebDriverWait(driver, 30).until(
-                                EC.visibility_of_element_located((By.ID, "txtStartDate"))
-                            )
-                            log(driver, "Modal is now visible after retry")
-                        except TimeoutException:
-                            log(driver, "Modal still not visible after retry")
-                            raise Exception("Modal did not become visible after retry")
-                    else:
-                        raise Exception("Could not find Add Allotment Room button after refresh")
-                
-                # Scroll modal into view
+                # Wait for modal to be fully loaded
+                WebDriverWait(driver, 30).until(
+                    EC.visibility_of_element_located((By.ID, "txtStartDate"))
+                )
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", modal)
-                time.sleep(1)  # Increased wait time for scroll to complete
-                
-            except Exception as e:
-                log(driver, f"Error handling sweet alert: {str(e)}")
-                raise Exception(f"Failed to handle sweet alert: {str(e)}")
-        
+                time.sleep(1)
+                # Add each date range in the batch
+                for date_range in batch:
+                    log(driver, f"    Adding date: {date_range['date']} (inventory: {date_range['inventory']})")
+                    add_date_range(driver, date_range['date'], date_range['date'])
+                # After adding all date ranges in the batch, select Deluxe room type
+                log(driver, "Selecting Deluxe room type...")
+                deluxe_checkbox = wait_for_element_presence(driver, By.XPATH, "//input[@type='checkbox' and @id='lstRoomType' and @value='DLT']", description="Deluxe room type checkbox")
+                if not deluxe_checkbox:
+                    log(driver, "Could not find Deluxe room type checkbox (DLT)")
+                    raise Exception("Could not find Deluxe room type checkbox (DLT)")
+                driver.execute_script("arguments[0].scrollIntoView(true);", deluxe_checkbox)
+                time.sleep(0.5)
+                if not deluxe_checkbox.is_selected():
+                    try:
+                        deluxe_checkbox.click()
+                    except:
+                        driver.execute_script("arguments[0].click();", deluxe_checkbox)
+                # Set number of rooms from inventory (use the group's inventory)
+                log(driver, "Setting number of rooms...")
+                number_of_rooms = wait_for_element_presence(driver, By.ID, "txtNumberOfRoom", description="number of rooms input")
+                if not number_of_rooms:
+                    log(driver, "Could not find number of rooms input field")
+                    raise Exception("Could not find number of rooms input field")
+                driver.execute_script("arguments[0].scrollIntoView(true);", number_of_rooms)
+                time.sleep(0.2)
+                number_of_rooms.clear()
+                number_of_rooms.send_keys(str(group[0]['inventory']))
+                log(driver, f"Set number of rooms to {group[0]['inventory']}")
+                # Add remark
+                log(driver, "Adding remark...")
+                remark_textarea = wait_for_element_presence(driver, By.ID, "txtRemarkAllotment", description="remark textarea")
+                if not remark_textarea:
+                    log(driver, "Could not find remark textarea")
+                    raise Exception("Could not find remark textarea")
+                driver.execute_script("arguments[0].scrollIntoView(true);", remark_textarea)
+                time.sleep(0.2)
+                remark_textarea.clear()
+                remark_textarea.send_keys(f"Updated from CSV data - Deluxe Online Inventory for inventory {group[0]['inventory']}, batch {batch_start//5 + 1}")
+                log(driver, "Added remark")
+                # Click Save button
+                log(driver, "Clicking Save button...")
+                save_button = wait_for_element_presence(driver, By.ID, "btnSaveRoomAllotment", description="save button")
+                if not save_button:
+                    log(driver, "Could not find save button")
+                    raise Exception("Could not find save button")
+                driver.execute_script("arguments[0].scrollIntoView(true);", save_button)
+                time.sleep(0.2)
+                save_button.click()
+                log(driver, "Clicked Save button")
+                time.sleep(1)
+                # Wait for and handle sweet alert
+                if not handle_sweet_alert(driver):
+                    log(driver, "Failed to handle sweet alert")
+                    raise Exception("Failed to handle sweet alert")
+                # Wait for toast to disappear
+                if not wait_for_toast_disappear(driver):
+                    log(driver, "Failed to wait for toast to disappear")
+                    raise Exception("Failed to wait for toast to disappear")
+                log(driver, f"Successfully processed batch {batch_start//5 + 1} in group {group_index + 1}")
+                # Wait a bit before processing next batch
+                time.sleep(2)
         log(driver, "Successfully processed all dates from CSV")
-        
-        log(driver, "Successfully logged in and selected hotel!")
         return True
         
     except Exception as e:
-        log(driver, f"An error occurred during login and hotel selection: {str(e)}")
+        log(driver, f"An error occurred: {str(e)}")
         return False
         
     finally:
         if should_quit_driver and driver:
-            # driver.quit()  # Commented out to keep browser open
             pass
 
 def wait_for_datepicker(driver, timeout=10):

@@ -1,230 +1,190 @@
 <template>
-  <div class="min-h-screen bg-gray-50 py-8">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <!-- Header Section -->
-      <div class="mb-8">
-        <div class="md:flex md:items-center md:justify-between">
-          <div class="min-w-0 flex-1">
-            <h2 class="text-3xl font-bold text-gray-900">Data Management</h2>
-            <p class="mt-1 text-sm text-gray-500">Manage and process your inventory data</p>
-          </div>
-        </div>
+  <div class="min-h-screen bg-app-primary text-app-tertiary">
+    <!-- Header -->
+    <header class="py-6">
+      <div class="container mx-auto px-4 text-center">
+        <h1 class="text-4xl font-bold text-app-tertiary">Data Scraper</h1>
+        <p class="text-lg text-gray-600 mt-1">Your automated inventory management assistant</p>
       </div>
+    </header>
 
-      <!-- Main Content Grid -->
-      <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <!-- Left Column: File Operations -->
-        <div class="space-y-6">
-          <!-- File Upload Card -->
-          <div class="bg-white shadow rounded-lg p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">File Operations</h3>
-            <div class="space-y-4">
-              <div class="flex flex-col space-y-2">
-                <label class="block text-sm font-medium text-gray-700">Upload CM Excel</label>
-                <div class="flex items-center space-x-4">
-                  <input 
-                    type="file" 
-                    accept=".xlsx" 
-                    @change="onFileChange" 
-                    :disabled="uploading"
-                    class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                  />
-                  <button
-                    @click="uploadFile"
-                    :disabled="!selectedFile || uploading"
-                    class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    <span v-if="uploading" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
-                    Upload
-                  </button>
-                </div>
-              </div>
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 pb-12">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left Column: Actions -->
+        <section class="lg:col-span-2 space-y-6">
+          <!-- Main Scraping Card -->
+          <div class="bg-white rounded-xl shadow-md p-6">
+            <h2 class="text-2xl font-bold text-app-tertiary mb-1">Start a New Scraping Task</h2>
+            <p class="text-gray-500 mb-4">Begin by selecting a start date and initiating the process.</p>
+
+            <div class="mb-4">
+              <label for="startDate" class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input
+                type="date"
+                id="startDate"
+                v-model="startDate"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-app-accent bg-gray-50 text-app-tertiary"
+              />
             </div>
+
+            <button
+              @click="startScraping"
+              :disabled="isScraping"
+              class="w-full flex items-center justify-center bg-app-accent text-white py-3 px-5 rounded-md hover:bg-opacity-90 transition-all disabled:opacity-50 font-bold text-base shadow"
+            >
+              <svg v-if="isScraping" class="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              {{ isScraping ? 'Scraping in Progress...' : 'Start Scraping Now' }}
+            </button>
           </div>
 
-          <!-- Action Buttons Card -->
-          <div class="bg-white shadow rounded-lg p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Data Processing</h3>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <!-- Add date input -->
-              <div class="sm:col-span-2">
-                <label class="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
-                <input 
-                  type="date" 
-                  v-model="startDate"
-                  class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
-                />
-              </div>
-              <button
-                type="button"
-                @click="startScraping"
-                :disabled="isScraping"
-                class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50 sm:col-span-2"
-              >
-                <svg v-if="isScraping" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                {{ isScraping ? 'Scraping in Progress...' : 'Start Scraping' }}
+          <!-- Other Actions Card -->
+          <div class="bg-white rounded-xl shadow-md p-6">
+            <h2 class="text-2xl font-bold text-app-tertiary mb-4">Additional Tools</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <button @click="openModal" :disabled="loadingProcessCM" class="group flex flex-col items-center justify-center bg-app-secondary/50 text-app-tertiary p-3 rounded-md hover:bg-app-secondary/80 transition-all disabled:opacity-50">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                <span class="font-semibold text-xs">Process CM</span>
               </button>
-              <button
-                @click="openModal"
-                :disabled="loadingProcessCM"
-                class="inline-flex items-center justify-center px-4 py-2 bg-yellow-600 text-white text-sm font-medium rounded hover:bg-yellow-700 disabled:opacity-50 sm:col-span-2"
-              >
-                <span v-if="loadingProcessCM" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
-                Process CM
+              <button @click="triggerCombine" :disabled="loadingCombine" class="group flex flex-col items-center justify-center bg-app-secondary/50 text-app-tertiary p-3 rounded-md hover:bg-app-secondary/80 transition-all disabled:opacity-50">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                <span class="font-semibold text-xs">Combine Inventory</span>
               </button>
-              <button
-                @click="triggerCombine"
-                :disabled="loadingCombine"
-                class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded hover:bg-indigo-700 disabled:opacity-50"
-              >
-                <span v-if="loadingCombine" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
-                Combine Inventory
-              </button>
-              <button
-                @click="triggerYield"
-                :disabled="loadingYield"
-                class="inline-flex items-center justify-center px-4 py-2 bg-green-600 text-white text-sm font-medium rounded hover:bg-green-700 disabled:opacity-50"
-              >
-                <span v-if="loadingYield" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
-                Calculate Yield
+              <button @click="triggerYield" :disabled="loadingYield" class="group flex flex-col items-center justify-center bg-app-secondary/50 text-app-tertiary p-3 rounded-md hover:bg-app-secondary/80 transition-all disabled:opacity-50">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                <span class="font-semibold text-xs">Calculate Yield</span>
               </button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <!-- Right Column: Status and Instructions -->
-        <div class="space-y-6">
-          <!-- Status Messages Card -->
-          <div class="bg-white shadow rounded-lg p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Status</h3>
-            <div class="space-y-4">
-              <div v-if="message" :class="['p-4 rounded-md', messageType === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800']">
+        <!-- Right Column: Status & Instructions -->
+        <aside class="lg:col-span-1 space-y-6">
+          <!-- Status Card -->
+          <div class="bg-white rounded-xl shadow-md p-5">
+            <h3 class="text-xl font-bold text-app-tertiary mb-3 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              Status
+            </h3>
+            <div class="space-y-2">
+              <div v-if="message" :class="['p-2.5 rounded-md text-xs font-medium', messageType === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800']">
                 {{ message }}
               </div>
-              <div v-if="error" class="p-4 bg-red-50 text-red-800 rounded-md">
+              <div v-if="error" class="p-2.5 bg-red-100 text-red-800 rounded-md text-xs font-medium">
                 {{ error }}
               </div>
-              <div v-if="success" class="p-4 bg-green-50 text-green-800 rounded-md">
+              <div v-if="success" class="p-2.5 bg-green-100 text-green-800 rounded-md text-xs font-medium">
                 {{ success }}
+              </div>
+              <div v-if="!message && !error && !success" class="text-gray-500 text-sm">
+                No new notifications. System is ready.
               </div>
             </div>
           </div>
 
           <!-- Instructions Card -->
-          <div class="bg-white shadow rounded-lg p-6">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Instructions</h3>
-            <div class="prose prose-sm text-gray-500">
-              <p>Click the "Start Scraping" button to begin the data scraping process. This will:</p>
-              <ul class="mt-2 list-disc list-inside space-y-1">
-                <li>Scrape inventory data from the PMS system</li>
-                <li>Process and clean the data</li>
-                <li>Save the results to the database</li>
-              </ul>
-              <p class="mt-4 text-sm text-gray-500">
-                Note: The scraping process may take a few minutes to complete. Please do not close the browser window during this time.
-              </p>
-            </div>
+          <div class="bg-app-secondary/20 rounded-xl p-5">
+             <h3 class="text-xl font-bold text-app-tertiary mb-3 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+              How it Works
+            </h3>
+            <ul class="space-y-2 text-gray-600 text-sm">
+              <li class="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 mt-0.5 text-app-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span>Select a <strong class="font-semibold text-app-tertiary">start date</strong> for the data scrape.</span>
+              </li>
+              <li class="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 mt-0.5 text-app-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span>Click <strong class="font-semibold text-app-tertiary">"Start Scraping"</strong> to begin the process.</span>
+              </li>
+              <li class="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 mt-0.5 text-app-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span>Use the <strong class="font-semibold text-app-tertiary">additional tools</strong> for processing and analysis.</span>
+              </li>
+               <li class="flex items-start">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 mt-0.5 text-app-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span>Monitor the progress in the <strong class="font-semibold text-app-tertiary">scraping modal.</strong></span>
+              </li>
+            </ul>
           </div>
-        </div>
+        </aside>
+
       </div>
-    </div>
+    </main>
 
     <!-- Modal for file upload -->
-    <div v-if="showModal" class="fixed inset-0 z-50 overflow-y-auto">
-      <div class="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" @click="closeModal"></div>
-        <div class="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
-          <div class="absolute right-0 top-0 pr-4 pt-4">
-            <button @click="closeModal" class="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none">
-              <span class="sr-only">Close</span>
-              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div class="sm:flex sm:items-start">
-            <div class="mt-3 text-center sm:mt-0 sm:text-left w-full">
-              <h3 class="text-lg font-semibold leading-6 text-gray-900 mb-4">Upload CM Excel File</h3>
-              <div class="mt-2">
-                <input 
-                  type="file" 
-                  accept=".xlsx" 
-                  @change="onFileChange" 
-                  :disabled="uploading || processingCM"
-                  class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-                />
-                <button
-                  @click="uploadAndProcessCM"
-                  :disabled="!selectedFile || uploading || processingCM"
-                  class="mt-4 w-full inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
-                >
-                  <span v-if="uploading || processingCM" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
-                  Upload & Process
-                </button>
-                <div v-if="modalStatus" :class="['mt-4 p-3 rounded-md text-center', modalStatusType === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800']">
-                  {{ modalStatus }}
-                </div>
-              </div>
-            </div>
-          </div>
+    <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+      <div class="relative bg-white rounded-xl shadow-xl w-full max-w-md p-6 m-4">
+        <button @click="closeModal" class="absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+          <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <h3 class="text-xl font-bold text-app-tertiary mb-4">Upload and Process CM File</h3>
+        
+        <div class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center mb-4">
+          <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+          <input
+            type="file"
+            accept=".xlsx"
+            @change="onFileChange"
+            :disabled="uploading || processingCM"
+            class="mt-2 block w-full text-xs text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-app-accent file:text-white hover:file:bg-opacity-90"
+          />
+        </div>
+
+        <button
+          @click="uploadAndProcessCM"
+          :disabled="!selectedFile || uploading || processingCM"
+          class="w-full flex items-center justify-center bg-app-accent text-white py-2.5 px-4 rounded-md hover:bg-opacity-90 transition-all disabled:opacity-50 font-bold text-sm"
+        >
+          <span v-if="uploading || processingCM" class="animate-spin mr-2 h-4 w-4 border-b-2 border-white rounded-full"></span>
+          {{ uploading ? 'Uploading...' : (processingCM ? 'Processing...' : 'Upload & Process') }}
+        </button>
+        <div v-if="modalStatus" :class="['mt-3 p-2.5 rounded-md text-center text-xs', modalStatusType === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800']">
+          {{ modalStatus }}
         </div>
       </div>
     </div>
 
     <!-- Scraping Process Modal -->
-    <div v-if="isScraping" class="fixed inset-0 z-50 overflow-y-auto">
-      <div class="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
-        <div class="relative transform overflow-hidden rounded-lg bg-white px-4 pb-4 pt-5 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-lg sm:p-6">
-          <div class="absolute right-0 top-0 pr-4 pt-4">
-            <button 
-              @click="closeScrapingModal"
-              class="rounded-md bg-white text-gray-400 hover:text-gray-500 focus:outline-none"
-            >
-              <span class="sr-only">Close</span>
-              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <div class="sm:flex sm:items-start">
-            <div class="mt-3 text-center sm:mt-0 sm:text-left w-full">
-              <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-medium text-gray-900">Scraping Progress</h3>
-                <div class="flex items-center">
-                  <div class="animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent mr-2"></div>
-                  <span class="text-sm text-gray-500">In Progress</span>
-                </div>
-              </div>
-              
-              <!-- Current Operation -->
-              <div v-if="currentOperation" class="mb-4 text-sm font-medium text-indigo-700 bg-indigo-50 py-2 px-3 rounded">
-                {{ currentOperation }}
-              </div>
-              
-              <!-- Progress Log -->
-              <div class="space-y-2 max-h-64 overflow-y-auto border border-gray-100 rounded p-3">
-                <div v-for="(log, index) in scrapingLogs" :key="index" 
-                     class="text-sm py-1 px-2 rounded my-1"
-                     :class="{
-                       'bg-green-50/60 text-green-700': typeof log === 'string' && (log.includes('successfully') || log.includes('completed')),
-                       'bg-blue-50/60 text-blue-700': typeof log === 'string' && (log.includes('Starting') || log.includes('Processing')),
-                       'bg-gray-50/60 text-gray-700': typeof log === 'string' && !log.includes('successfully') && !log.includes('completed') && !log.includes('Starting') && !log.includes('Processing')
-                     }">
-                  {{ typeof log === 'object' ? JSON.stringify(log) : log }}
-                </div>
-              </div>
-            </div>
+    <div v-if="isScraping" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+       <div class="relative bg-white rounded-xl shadow-xl w-full max-w-xl p-6 m-4">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-app-tertiary flex items-center">
+            <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-app-accent mr-3"></div>
+            Scraping in Progress
+          </h3>
+          <button @click="closeScrapingModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="bg-app-secondary/50 p-3 rounded-md mb-3">
+          <p class="font-semibold text-app-tertiary text-sm">Current Operation:</p>
+          <p class="text-app-tertiary font-mono text-xs">{{ currentOperation }}</p>
+        </div>
+
+        <div class="h-72 overflow-y-auto bg-gray-50 rounded-md p-3 border border-gray-200">
+          <div v-for="(log, index) in scrapingLogs" :key="index" class="font-mono text-xs py-1 border-b border-gray-100 last:border-b-0">
+            <span :class="{
+              'text-green-600': typeof log === 'string' && (log.includes('successfully') || log.includes('completed')),
+              'text-blue-600': typeof log === 'string' && (log.includes('Starting') || log.includes('Processing')),
+              'text-gray-600': typeof log !== 'string' || (!log.includes('successfully') && !log.includes('completed') && !log.includes('Starting') && !log.includes('Processing'))
+            }">
+              {{ typeof log === 'object' ? JSON.stringify(log) : log }}
+            </span>
           </div>
         </div>
       </div>
     </div>
   </div>
 </template>
-
 <script setup lang="ts">
 import { ref } from 'vue'
 import axios from '../plugins/axios'
@@ -462,4 +422,4 @@ function closeScrapingModal() {
   }
   isScraping.value = false;
 }
-</script> 
+</script>

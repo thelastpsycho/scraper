@@ -4,6 +4,7 @@ import Scraping from './views/Scraping.vue'
 import Yielder from './views/Yielder.vue'
 import Data from './views/Data.vue'
 import Allotment from './views/Allotment.vue'
+import Chat from './views/Chat.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -32,6 +33,11 @@ const router = createRouter({
       path: '/allotment',
       name: 'allotment',
       component: Allotment
+    },
+    {
+      path: '/chat',
+      name: 'chat',
+      component: Chat
     }
   ]
 })
