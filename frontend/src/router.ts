@@ -24,11 +24,11 @@ const router = createRouter({
       name: 'yielder',
       component: Yielder
     },
-    // {
-    //   path: '/data',
-    //   name: 'data',
-    //   component: Data
-    // },
+    {
+      path: '/data',
+      name: 'data',
+      component: Data
+    },
     {
       path: '/allotment',
       name: 'allotment',
