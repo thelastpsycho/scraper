@@ -67,7 +67,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted } from 'vue';
-import axios from 'axios';
+import axios from '../plugins/axios';
 import { marked } from 'marked';
 import { useChatStore } from '../stores';
 import {

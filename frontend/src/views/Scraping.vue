@@ -235,7 +235,7 @@ const startScraping = async () => {
     
     // Then create EventSource for Server-Sent Events
     console.log('Establishing SSE connection...')
-    eventSource = new EventSource('/api/scrape/stream')
+    eventSource = new EventSource('http://127.0.0.1:5666/api/scrape/stream')
     
     // Add connection opened handler
     eventSource.onopen = () => {

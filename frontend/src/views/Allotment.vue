@@ -95,7 +95,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import axios from 'axios'
+import axios from '../plugins/axios'
 
 const isUpdating = ref(false)
 const statusMessage = ref('Ready to update allotment')
@@ -133,7 +133,7 @@ const triggerUpdate = async () => {
     addLog('Starting allotment update process...', 'info')
 
     // Create EventSource for real-time updates
-    const eventSource = new EventSource('/api/update-allotment/stream')
+    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
     
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
@@ -175,7 +175,7 @@ const triggerDomUpdate = async () => {
     addLog('Starting DOM-based allotment update process...', 'info')
 
     // Create EventSource for real-time updates
-    const eventSource = new EventSource('/api/update-allotment/stream')
+    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
     
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
