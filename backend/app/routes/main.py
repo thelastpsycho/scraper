@@ -4,6 +4,7 @@ from ..scraper.combine_inventory import combine_inventory_files
 from ..scraper.yielder import load_and_clean_data, apply_yield_matrix
 from ..scraper.process_cm_inventory import process_cm_inventory
 from ..scraper.update_pms_cm_allotment import update_allotmet
+from ..scraper.update_rest_allotment import update_rest_allotment
 from ..shared import log_queue
 import queue
 import threading
@@ -523,4 +524,62 @@ def trigger_update_allotment():
             'status': 'error',
             'message': str(e)
         }), 500
- 
+
+@bp.route('/api/update-rest-allotment', methods=['POST'])
+def trigger_update_rest_allotment():
+    """Trigger allotment update process for the 11 room types other than Deluxe/Premiere"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        max_dates = data.get('max_dates')
+
+        if not username or not password:
+            return jsonify({
+                'status': 'error',
+                'message': 'Username and password are required'
+            }), 400
+
+        # Start update process in a separate thread
+        def update_process():
+            try:
+                log_queue.put({
+                    'type': 'info',
+                    'message': 'Starting allotment update process for the rest of the room types...'
+                })
+
+                result = update_rest_allotment(username=username, password=password, max_dates=max_dates)
+
+                if result:
+                    log_queue.put({
+                        'type': 'success',
+                        'message': 'Allotment updated successfully!'
+                    })
+                else:
+                    log_queue.put({
+                        'type': 'error',
+                        'message': 'Failed to update allotment'
+                    })
+            except Exception as e:
+                log_queue.put({
+                    'type': 'error',
+                    'message': f'Error during update: {str(e)}'
+                })
+            finally:
+                # Signal the end of streaming
+                log_queue.put(None)
+
+        # Start the update process in a background thread
+        thread = threading.Thread(target=update_process)
+        thread.start()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Update process started'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500

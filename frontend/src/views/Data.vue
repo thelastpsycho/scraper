@@ -78,11 +78,19 @@
                 <p class="text-sm">Please ensure the required data processing steps have been completed.</p>
               </div>
 
-              <div v-else class="flex-1 overflow-y-auto border border-gray-200 rounded-lg">
-                <table class="min-w-full divide-y divide-gray-200 text-sm">
+              <div v-else class="flex-1 overflow-auto border border-gray-200 rounded-lg">
+                <table class="min-w-full divide-y divide-gray-200" :class="tab.id === 'allocation' ? 'text-xs' : 'text-sm'">
                   <thead class="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      <th v-for="header in getHeadersForTab(tab.id)" :key="header" scope="col" class="py-3.5 px-4 text-left font-semibold text-gray-900 cursor-pointer hover:bg-gray-100 group" @click="sortTab(tab.id, header)">
+                      <th
+                        v-for="header in getHeadersForTab(tab.id)"
+                        :key="header"
+                        scope="col"
+                        class="py-3.5 px-4 text-left font-semibold text-gray-900 cursor-pointer hover:bg-gray-100 group"
+                        :class="getStickyClass(tab.id, header, true) || getRoomColorClass(tab.id, header, true)"
+                        :style="getStickyStyle(tab.id, header)"
+                        @click="sortTab(tab.id, header)"
+                      >
                         <div class="flex items-center space-x-2">
                           <span>{{ header.replace(/_/g, ' ') }}</span>
                           <span v-if="sortColumn === header">{{ sortDirection === 'asc' ? '▲' : '▼' }}</span>
@@ -92,8 +100,14 @@
                   </thead>
                   <tbody class="divide-y divide-gray-200 bg-white">
                     <tr v-for="(row, index) in getDataForTab(tab.id)" :key="index" class="hover:bg-gray-50 transition-colors">
-                      <td v-for="header in getHeadersForTab(tab.id)" :key="header" class="whitespace-nowrap px-4 py-3 font-mono" :class="getCellClass(row[header])">
-                        {{ formatValue(row[header], header) }}
+                      <td
+                        v-for="header in getHeadersForTab(tab.id)"
+                        :key="header"
+                        class="whitespace-nowrap px-4 py-3 font-mono"
+                        :class="[getCellClass(row[header]), getStickyClass(tab.id, header, false) || getRoomColorClass(tab.id, header, false)]"
+                        :style="getStickyStyle(tab.id, header)"
+                      >
+                        {{ getDisplayValue(tab.id, row, header) }}
                       </td>
                     </tr>
                   </tbody>
@@ -150,6 +164,111 @@ const sortColumn = ref('')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 
 const tooltipMappingsRef = ref<Record<string, string>>({})
+
+// Shared full-name -> short-code abbreviations for room types (Combined + Allocation tabs).
+// The Allocation table's columns are built from yielder.py's output, which renames
+// 'Deluxe Room'/'Premiere Room' down to just 'Deluxe'/'Premiere' - both spellings are
+// mapped here so this table works against either source.
+const roomTypeAbbreviations: Record<string, string> = {
+  'Deluxe Room': 'DLX',
+  'Deluxe': 'DLX',
+  'Premiere Room': 'PRE',
+  'Premiere': 'PRE',
+  'Deluxe Pool Access': 'DLP',
+  'Premiere Room Lagoon Access': 'PKL',
+  'Family Premiere Room': 'FPK',
+  'Deluxe Suite Room': 'DLS',
+  'Premiere Suite Room': 'PRS',
+  'The Anvaya Suite No Pool': 'AVS',
+  'The Anvaya Suite Whirpool': 'ASW',
+  'Beach Front Private Suite Room': 'BFS',
+  'The Anvaya Suite With Pool': 'ASP',
+  'The Anvaya Residence': 'AVR',
+  'The Anvaya Villa': 'AVP',
+}
+
+// Display order for room-type column groups (Allocation tab)
+const roomTypeOrder = ['DLX', 'PRE', 'DLP', 'PKL', 'FPK', 'DLS', 'PRS', 'AVS', 'ASW', 'BFS', 'ASP', 'AVR', 'AVP']
+
+// One distinct pastel color per room-type abbreviation, applied to its header + cells
+const roomTypeColors: Record<string, { header: string; cell: string }> = {
+  DLX: { header: 'bg-blue-100 text-blue-800', cell: 'bg-blue-50' },
+  PRE: { header: 'bg-purple-100 text-purple-800', cell: 'bg-purple-50' },
+  DLP: { header: 'bg-cyan-100 text-cyan-800', cell: 'bg-cyan-50' },
+  PKL: { header: 'bg-teal-100 text-teal-800', cell: 'bg-teal-50' },
+  FPK: { header: 'bg-pink-100 text-pink-800', cell: 'bg-pink-50' },
+  DLS: { header: 'bg-indigo-100 text-indigo-800', cell: 'bg-indigo-50' },
+  PRS: { header: 'bg-violet-100 text-violet-800', cell: 'bg-violet-50' },
+  AVS: { header: 'bg-amber-100 text-amber-800', cell: 'bg-amber-50' },
+  ASW: { header: 'bg-sky-100 text-sky-800', cell: 'bg-sky-50' },
+  BFS: { header: 'bg-emerald-100 text-emerald-800', cell: 'bg-emerald-50' },
+  ASP: { header: 'bg-lime-100 text-lime-800', cell: 'bg-lime-50' },
+  AVR: { header: 'bg-rose-100 text-rose-800', cell: 'bg-rose-50' },
+  AVP: { header: 'bg-orange-100 text-orange-800', cell: 'bg-orange-50' },
+}
+
+// On the Allocation tab, Date and Season/Demand are pinned to the left (in this order) so
+// they stay visible while scrolling horizontally. Fixed pixel widths are required so the
+// second sticky column's offset lines up exactly with the first column's rendered width.
+const STICKY_COLUMN_WIDTHS: Record<string, number> = {
+  'Date': 170,
+  'Season/Demand': 150,
+}
+const STICKY_COLUMN_ORDER = Object.keys(STICKY_COLUMN_WIDTHS)
+
+const getStickyOffset = (header: string) => {
+  const index = STICKY_COLUMN_ORDER.indexOf(header)
+  if (index <= 0) return 0
+  return STICKY_COLUMN_ORDER.slice(0, index).reduce((sum, h) => sum + STICKY_COLUMN_WIDTHS[h], 0)
+}
+
+const getStickyStyle = (tabId: string, header: string) => {
+  if (tabId !== 'allocation' || !(header in STICKY_COLUMN_WIDTHS)) return {}
+  const width = `${STICKY_COLUMN_WIDTHS[header]}px`
+  return { left: `${getStickyOffset(header)}px`, width, minWidth: width, maxWidth: width }
+}
+
+const getStickyClass = (tabId: string, header: string, isHeader: boolean) => {
+  if (tabId !== 'allocation' || !(header in STICKY_COLUMN_WIDTHS)) return ''
+  const bg = isHeader ? 'bg-gray-50' : 'bg-white'
+  const z = isHeader ? 'z-20' : 'z-10'
+  return `sticky ${z} ${bg} overflow-hidden text-ellipsis`
+}
+
+// Allocation tab's Date column shows "08Aug / 98.37%" (day+month, no year, plus occupancy)
+const getAllocationDateDisplay = (row: Record<string, any>) => {
+  const d = new Date(row['Date'])
+  let dateLabel = row['Date']
+  if (!isNaN(d.getTime())) {
+    const day = d.getDate().toString().padStart(2, '0')
+    const month = d.toLocaleString('en-US', { month: 'short' })
+    dateLabel = `${day}${month}`
+  }
+  const occ = row['Occ%']
+  return occ === undefined || occ === null ? dateLabel : `${dateLabel} / ${occ}%`
+}
+
+// Renders a cell's display value, handling the Allocation tab's virtual merged columns
+// (Date+Occupancy, Season+Demand) before falling back to the generic formatValue
+const getDisplayValue = (tabId: string, row: Record<string, any>, header: string) => {
+  if (tabId === 'allocation') {
+    if (header === 'Date') return getAllocationDateDisplay(row)
+    if (header === 'Season/Demand') return `${row['Season'] ?? '-'}/${row['Demand'] ?? '-'}`
+  }
+  return formatValue(row[header], header)
+}
+
+// On the Allocation tab, looks up a header's room-type abbreviation (its first word, e.g.
+// "DLX" from "DLX Rem") and returns the matching background color class. Scoped to the
+// Allocation tab only - other tabs' raw column names (e.g. PMS Raw's "ASP"/"AVR"/"BFS")
+// can coincidentally collide with these abbreviations without actually being related.
+const getRoomColorClass = (tabId: string, header: string, isHeader: boolean) => {
+  if (tabId !== 'allocation') return ''
+  const abbrev = header.split(' ')[0]
+  const colors = roomTypeColors[abbrev]
+  if (!colors) return ''
+  return isHeader ? colors.header : colors.cell
+}
 
 // Data Accessors
 const getDataForTab = (tabId: string) => {
@@ -290,8 +409,58 @@ const fetchData = async () => {
     }
 
     if (responses[3].status === 'fulfilled' && responses[3].value.data.status === 'success') {
-      allocationData.value = responses[3].value.data.data;
-      if (allocationData.value.length > 0) allocationHeaders.value = Object.keys(allocationData.value[0]);
+      const rawData = responses[3].value.data.data;
+
+      const baseColumnRenames: Record<string, string> = {
+        'Occupancy': 'Occ%',
+        'DemandLevel': 'Demand',
+      };
+      const suffixRenames: [string, string][] = [
+        [' Remaining Inventory', ' Rem'],
+        [' Online Inventory', ' On'],
+        [' BAR Rate', ' BAR'],
+      ];
+
+      const renameAllocationColumn = (key: string): string => {
+        if (baseColumnRenames[key]) return baseColumnRenames[key];
+        for (const [fullSuffix, shortSuffix] of suffixRenames) {
+          if (key.endsWith(fullSuffix)) {
+            const roomTypeName = key.slice(0, -fullSuffix.length);
+            const abbrev = roomTypeAbbreviations[roomTypeName];
+            if (abbrev) return `${abbrev}${shortSuffix}`;
+          }
+        }
+        return key;
+      };
+
+      const processedData = rawData.map((row: Record<string, any>) => {
+        const newRow: Record<string, any> = {};
+        for (const key in row) {
+          if (key === 'DayOfWeek') continue; // redundant with Date, drop from display
+          newRow[renameAllocationColumn(key)] = row[key];
+        }
+        return newRow;
+      });
+
+      allocationData.value = processedData;
+
+      if (processedData.length > 0) {
+        // 'Season/Demand' and Date's occupancy suffix are virtual, computed columns (see
+        // getDisplayValue) - Season/Demand isn't a literal row key, so it needs its own
+        // availability check rather than the plain firstRowKeys.includes(header) below.
+        const columnOrder = [
+          'Date', 'Season/Demand',
+          ...roomTypeOrder.flatMap(code => [`${code} Rem`, `${code} On`, `${code} BAR`])
+        ];
+        const firstRowKeys = Object.keys(processedData[0]);
+        const isColumnAvailable = (header: string) => {
+          if (header === 'Season/Demand') return firstRowKeys.includes('Season') && firstRowKeys.includes('Demand');
+          return firstRowKeys.includes(header);
+        };
+        allocationHeaders.value = columnOrder.filter(isColumnAvailable);
+      } else {
+        allocationHeaders.value = [];
+      }
     }
 
   } catch (err: any) {

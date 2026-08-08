@@ -66,6 +66,11 @@ def combine_inventory_files():
             print(f"Error converting dates: {e}")
             return None
 
+        # PMS and CM name this room type differently, so it never collides
+        # during the merge below and ends up as two unsummed columns instead
+        # of being combined like every other room type.
+        cm_df = cm_df.rename(columns={'The Anvaya Suite with Whirpool': 'The Anvaya Suite Whirpool'})
+
         # Merge the dataframes on Date
         try:
             combined_df = pd.merge(pms_df, cm_df, on='Date', how='outer')

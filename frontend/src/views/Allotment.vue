@@ -29,6 +29,13 @@
         >
           {{ isUpdating ? 'Updating...' : 'Update Premiere' }}
         </button>
+        <button
+          @click="triggerUpdateRest"
+          :disabled="isUpdating"
+          class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ml-2"
+        >
+          {{ isUpdating ? 'Updating...' : 'Update the Rest' }}
+        </button>
       </div>
     </div>
 
@@ -172,6 +179,49 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
       username: username.value,
       password: password.value,
       room_type: roomType,
+      max_dates: maxDates.value || null
+    })
+
+  } catch (error: any) {
+    addLog(`Error: ${error.response?.data?.message || error.message}`, 'error')
+    statusMessage.value = `Error: ${error.response?.data?.message || error.message}`
+    isUpdating.value = false
+  }
+}
+
+const triggerUpdateRest = async () => {
+  try {
+    isUpdating.value = true
+    statusMessage.value = 'Updating the rest of the room types allotment...'
+    addLog('Starting allotment update process for the rest of the room types...', 'info')
+
+    // Create EventSource for real-time updates
+    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      addLog(data.message, data.type)
+
+      if (data.type === 'success' || data.type === 'error') {
+        eventSource.close()
+        isUpdating.value = false
+        statusMessage.value = data.type === 'success'
+          ? 'The rest of the room types allotment updated successfully!'
+          : `Error: ${data.message}`
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      addLog('Connection error occurred', 'error')
+      eventSource.close()
+      isUpdating.value = false
+      statusMessage.value = 'Error: Connection lost'
+    }
+
+    // Send credentials to start the process
+    await axios.post('/api/update-rest-allotment', {
+      username: username.value,
+      password: password.value,
       max_dates: maxDates.value || null
     })
 

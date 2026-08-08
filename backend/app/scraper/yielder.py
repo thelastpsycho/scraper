@@ -15,27 +15,66 @@ LOW_THRESHOLD_PCT = 0.2       # 20% of capacity
 # Room capacity configuration
 ROOM_CAPS = {
     'Deluxe Room': 160,
-    'Premiere Room': 260
+    'Premiere Room': 260,
+    'Deluxe Pool Access': 22,
+    'Premiere Room Lagoon Access': 26,
+    'Premiere Suite Room': 9,
+    'Deluxe Suite Room': 5,
+    'Family Premiere Room': 4,
+    'Beach Front Private Suite Room': 8,
+    'The Anvaya Suite Whirpool': 4,
+    'The Anvaya Suite No Pool': 4,
+    'The Anvaya Suite With Pool': 2,
+    'The Anvaya Residence': 1,
+    'The Anvaya Villa': 1,
 }
 
-# Override configuration
-DELUXE_OVERRIDE_OCCUPANCY = 70  # Override threshold for occupancy
-DELUXE_OVERRIDE_PREMIERE = 61   # Override threshold for Premiere inventory
-DELUXE_OVERRIDE_AMOUNT = 2      # Amount of Deluxe rooms to open in override
+# Room types that only get an online-inventory count (no BAR yielding), each
+# closed entirely once occupancy is near-full regardless of their own rule.
+SIMPLE_ROOM_TYPES = [k for k in ROOM_CAPS if k not in ('Deluxe Room', 'Premiere Room')]
+NEAR_FULL_OCCUPANCY_THRESHOLD = 95
 
 # Get the absolute path to the data directory within the scraper folder
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(CURRENT_DIR, 'data')
 
-def should_override_deluxe(occupancy, premiere_inventory, deluxe_inventory):
-    """
-    Determine if Deluxe inventory should be overridden based on conditions:
-    1. Deluxe inventory is less than 1
-    2. AND (Occupancy is lower than DELUXE_OVERRIDE_OCCUPANCY
-        OR Premiere inventory is higher than DELUXE_OVERRIDE_PREMIERE)
-    """
-    return (deluxe_inventory < 1 and 
-            (occupancy < DELUXE_OVERRIDE_OCCUPANCY or premiere_inventory > DELUXE_OVERRIDE_PREMIERE))
+def get_online_allotment(remaining, room_cap):
+    """Tiered bucket allotment: how many rooms to open online given how many remain."""
+    if remaining <= 0:
+        return 0
+    elif 1 <= remaining <= 5:
+        return min(2, remaining, room_cap)
+    elif 6 <= remaining <= 10:
+        return min(5, remaining, room_cap)
+    elif 11 <= remaining <= 50:
+        return min(10, remaining, room_cap)
+    else:  # remaining > 50
+        return min(30, remaining, room_cap)
+
+def allot_minus_one(remaining):
+    return max(0, remaining - 1)
+
+def allot_minus_one_except_one(remaining):
+    if remaining <= 0:
+        return 0
+    if remaining == 1:
+        return 1
+    return remaining - 1
+
+def allot_as_remaining(remaining):
+    return max(0, remaining)
+
+def allot_deluxe_suite(remaining, premiere_suite_remaining):
+    if remaining >= 5:
+        return 4
+    elif remaining == 4:
+        return 3
+    elif remaining in (2, 3):
+        return 2
+    elif remaining == 1:
+        return 1
+    else:  # remaining <= 0
+        return 1 if premiere_suite_remaining > 3 else 0
 
 # Load and clean the dataset
 def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
@@ -84,18 +123,19 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
         if old_name in data.columns:
             data = data.rename(columns={old_name: new_name})
     
-    relevant_columns = ['Date', 'Deluxe Room', 'Premiere Room', 'Occupancy']
+    relevant_columns = ['Date', 'Deluxe Room', 'Premiere Room', 'Occupancy'] + SIMPLE_ROOM_TYPES
     missing_columns = [col for col in relevant_columns if col not in data.columns]
     if missing_columns:
         print(f"Error: Missing required columns: {missing_columns}")
         print("Available columns:", data.columns.tolist())
         return None
-    
+
     data = data[relevant_columns]
-    
+
+    inventory_columns = ['Deluxe Room', 'Premiere Room'] + SIMPLE_ROOM_TYPES
     if data.isnull().any().any():
         print("Warning: Missing values detected. Filling with 0 for inventory and median for Occupancy.")
-        data[['Deluxe Room', 'Premiere Room']] = data[['Deluxe Room', 'Premiere Room']].fillna(0)
+        data[inventory_columns] = data[inventory_columns].fillna(0)
         data['Occupancy'] = data['Occupancy'].fillna(data['Occupancy'].median())
     
     try:
@@ -139,7 +179,7 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
     
     data['DayOfWeek'] = data['Date'].dt.day_name()
     
-    if (data['Deluxe Room'] < 0).any() or (data['Premiere Room'] < 0).any():
+    if (data[inventory_columns] < 0).any().any():
         print("Warning: Negative inventory values detected.")
     
     return data
@@ -213,7 +253,9 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
     data['Deluxe BAR Rate'] = ''
     data['Premiere Online Inventory'] = 0
     data['Premiere BAR Rate'] = ''
-    
+    for room_type in SIMPLE_ROOM_TYPES:
+        data[f'{room_type} Online Inventory'] = 0
+
     for idx, row in data.iterrows():
         season = row['Season']
         demand = row['DemandLevel']
@@ -228,20 +270,7 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
 
         premiere_remaining = row['Premiere Room']
         deluxe_remaining = row['Deluxe Room']
-        
-        # Function to determine online allotment based on remaining inventory
-        def get_online_allotment(remaining, room_cap):
-            if remaining <= 0:
-                return 0
-            elif 1 <= remaining <= 5:
-                return min(2, remaining, room_cap)
-            elif 6 <= remaining <= 10:
-                return min(5, remaining, room_cap)
-            elif 11 <= remaining <= 50:
-                return min(10, remaining, room_cap)
-            else:  # remaining > 50
-                return min(30, remaining, room_cap)
-        
+
         # Function to adjust BAR rate based on remaining inventory
         def adjust_bar_rate(base_bar, remaining_inventory, room_type, demand, season):
             
@@ -277,14 +306,8 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         # Deluxe Room
         room = 'Deluxe Room'
         remaining = deluxe_remaining
-        
-        # Check for override conditions
-        if should_override_deluxe(row['Occupancy'], premiere_remaining, remaining):
-            online_inventory = DELUXE_OVERRIDE_AMOUNT
-            print(f"{row['Date'].strftime('%Y-%m-%d')} Deluxe Room: Override applied - Opening {online_inventory} rooms (Occupancy: {row['Occupancy']:.2f}%, Premiere: {premiere_remaining}, Deluxe: {remaining})")
-        else:
-            online_inventory = get_online_allotment(remaining, room_caps[room])
-        
+        online_inventory = get_online_allotment(remaining, room_caps[room])
+
         base_bar = yield_matrix[room][season][demand]['bar']
         if base_bar not in valid_bar_rates:
             print(f"Warning: Invalid Deluxe BAR Rate '{base_bar}' for {row['Date'].strftime('%Y-%m-%d')}. Using BAR5.")
@@ -293,7 +316,27 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         
         data.at[idx, 'Deluxe Online Inventory'] = online_inventory
         data.at[idx, 'Deluxe BAR Rate'] = bar_rate
-    
+
+        # Remaining room types: online-inventory count only, no BAR yielding.
+        # Fully closed once occupancy is near-full, regardless of their own rule.
+        near_full = row['Occupancy'] >= NEAR_FULL_OCCUPANCY_THRESHOLD
+        premiere_suite_remaining = row['Premiere Suite Room']
+        for room_type in SIMPLE_ROOM_TYPES:
+            remaining = row[room_type]
+            if near_full:
+                simple_online = 0
+            elif room_type in ('Deluxe Pool Access', 'Premiere Room Lagoon Access', 'Premiere Suite Room'):
+                simple_online = get_online_allotment(remaining, room_caps[room_type])
+            elif room_type == 'Deluxe Suite Room':
+                simple_online = allot_deluxe_suite(remaining, premiere_suite_remaining)
+            elif room_type == 'Beach Front Private Suite Room':
+                simple_online = allot_minus_one_except_one(remaining)
+            elif room_type in ('Family Premiere Room', 'The Anvaya Suite Whirpool', 'The Anvaya Suite No Pool'):
+                simple_online = allot_minus_one(remaining)
+            else:  # The Anvaya Suite With Pool, The Anvaya Residence, The Anvaya Villa
+                simple_online = allot_as_remaining(remaining)
+            data.at[idx, f'{room_type} Online Inventory'] = simple_online
+
     return data
 
 # Main execution
@@ -314,15 +357,20 @@ def main():
         # Rename the columns to match the expected output format
         output = output.rename(columns={
             'Deluxe Room': 'Deluxe Remaining Inventory',
-            'Premiere Room': 'Premiere Remaining Inventory'
+            'Premiere Room': 'Premiere Remaining Inventory',
+            **{room_type: f'{room_type} Remaining Inventory' for room_type in SIMPLE_ROOM_TYPES}
         })
-        
+
         # Select and order the columns for output
+        simple_room_columns = []
+        for room_type in SIMPLE_ROOM_TYPES:
+            simple_room_columns += [f'{room_type} Remaining Inventory', f'{room_type} Online Inventory']
+
         output = output[[
             'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
             'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
             'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
-        ]]
+        ] + simple_room_columns]
         
         # Format the date and occupancy
         output['Date'] = output['Date'].dt.strftime('%Y-%m-%d')
@@ -363,7 +411,8 @@ def main():
             'Deluxe BAR Rate': 'TEXT',
             'Premiere Remaining Inventory': 'INTEGER',
             'Premiere Online Inventory': 'INTEGER',
-            'Premiere BAR Rate': 'TEXT'
+            'Premiere BAR Rate': 'TEXT',
+            **{col: 'INTEGER' for col in simple_room_columns}
         }
         
         # Save to database
