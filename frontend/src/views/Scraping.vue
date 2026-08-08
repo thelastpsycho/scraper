@@ -277,8 +277,17 @@ const startScraping = async () => {
         if (messageData.status === "success" || messageData.status === "complete") {
           currentOperation.value = messageData.message || 'Operation completed';
         }
-        
+
         scrapingLogs.value.push(messageData);
+
+        // "complete" is always the final event the backend sends before closing
+        // the stream, so treat it as the signal to stop and close the modal.
+        if (messageData.status === "complete") {
+          success.value = messageData.message || 'Scraping completed successfully!';
+          eventSource?.close();
+          isScraping.value = false;
+          return;
+        }
       } catch (e) {
         // Not JSON or parsing failed, treat as regular message
         // Update the current operation text for meaningful string messages

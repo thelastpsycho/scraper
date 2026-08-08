@@ -16,7 +16,6 @@ import os
 import json
 import sqlite3
 import pandas as pd
-from ..scraper.update_allotment_dom import main as update_allotment_dom_main
 
 bp = Blueprint('main', __name__)
 
@@ -464,11 +463,19 @@ def trigger_update_allotment():
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
+        room_type = data.get('room_type', 'deluxe')
+        max_dates = data.get('max_dates')
 
         if not username or not password:
             return jsonify({
                 'status': 'error',
                 'message': 'Username and password are required'
+            }), 400
+
+        if room_type not in ('deluxe', 'premiere'):
+            return jsonify({
+                'status': 'error',
+                'message': 'room_type must be "deluxe" or "premiere"'
             }), 400
 
         # Start update process in a separate thread
@@ -477,11 +484,11 @@ def trigger_update_allotment():
                 # Add initial log
                 log_queue.put({
                     'type': 'info',
-                    'message': 'Starting allotment update process...'
+                    'message': f'Starting {room_type} allotment update process...'
                 })
 
                 # Call the update function
-                result = update_allotmet(username=username, password=password)
+                result = update_allotmet(username=username, password=password, room_type=room_type, max_dates=max_dates)
 
                 if result:
                     log_queue.put({
@@ -516,51 +523,4 @@ def trigger_update_allotment():
             'status': 'error',
             'message': str(e)
         }), 500
-
-@bp.route('/api/update-allotment-dom', methods=['POST'])
-def trigger_update_allotment_dom():
-    """Trigger DOM-based allotment update process"""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        password = data.get('password')
-
-        if not username or not password:
-            return jsonify({
-                'status': 'error',
-                'message': 'Username and password are required'
-            }), 400
-
-        # Start update process in a separate thread
-        def update_process():
-            try:
-                log_queue.put({
-                    'type': 'info',
-                    'message': 'Starting DOM-based allotment update process...'
-                })
-                # Call the update_allotment_dom main function
-                update_allotment_dom_main()
-                log_queue.put({
-                    'type': 'success',
-                    'message': 'DOM-based allotment update completed!'
-                })
-            except Exception as e:
-                log_queue.put({
-                    'type': 'error',
-                    'message': f'Error during DOM update: {str(e)}'
-                })
-            finally:
-                log_queue.put(None)
-
-        thread = threading.Thread(target=update_process)
-        thread.start()
-
-        return jsonify({
-            'status': 'success',
-            'message': 'DOM update process started'
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500 
+ 

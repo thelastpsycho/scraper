@@ -117,7 +117,7 @@ def wait_for_table_load(driver, timeout=20):
 def setup_driver():
     # Set up Chrome options
     chrome_options = Options()
-    chrome_options.add_argument('--headless=new')
+    # chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -155,40 +155,230 @@ def scrape_pms_inventory(start_date=None):
         username_field = wait_for_element_presence(driver, By.ID, "txtUsername", timeout=15, description="username field")
         if not username_field:
             raise Exception("Username field not found")
-        
+
         # Ensure the field is interactable
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.ID, "txtUsername"))
         )
         username_field.clear()
         username_field.send_keys("krisnatha")
-        
+
         password_field = driver.find_element(By.ID, "txtPassword")
         password_field.clear()
-        password_field.send_keys("Nasibungkus13")
+        password_field.send_keys("Nasibungkus13!!")
+
+        # Check for any additional required fields or tokens
+        print("Checking for additional form fields...")
+        try:
+            # Get all form fields
+            all_inputs = driver.find_elements(By.CSS_SELECTOR, "#formLogin input")
+            print(f"Found {len(all_inputs)} inputs in login form:")
+            for inp in all_inputs:
+                print(f"  - name='{inp.get_attribute('name')}', type='{inp.get_attribute('type')}', "
+                      f"id='{inp.get_attribute('id')}', required={inp.get_attribute('required')}, "
+                      f"value='{inp.get_attribute('value')[:20] if inp.get_attribute('value') else ''}'")
+
+            # Look for required fields
+            required_fields = driver.find_elements(By.CSS_SELECTOR, "#formLogin input[required]")
+            print(f"Found {len(required_fields)} required fields")
+            for field in required_fields:
+                print(f"  Required field: name='{field.get_attribute('name')}', id='{field.get_attribute('id')}'")
+
+        except Exception as e:
+            print(f"Could not analyze form fields: {e}")
         
-        # Click the login button
-        if not wait_and_click(driver, By.ID, "btnLogin", description="login button"):
-            raise Exception("Failed to click login button")
-        
+        # Try to clear the modal fields and focus only on main form
+        print("Clearing modal fields to avoid validation issues...")
+        try:
+            modal_user = driver.find_element(By.ID, "ModalProcessNAUserId")
+            modal_pass = driver.find_element(By.ID, "ModalProcessNAPassword")
+
+            # Remove required attribute from modal fields temporarily
+            driver.execute_script("""
+                arguments[0].removeAttribute('required');
+                arguments[1].removeAttribute('required');
+            """, modal_user, modal_pass)
+
+            print("Modal fields marked as non-required")
+        except:
+            print("Could not modify modal fields")
+
+        # Try multiple methods to submit the login form
+        print("Attempting login form submission...")
+
+        # Method 1: Submit the form directly
+        try:
+            login_form = driver.find_element(By.ID, "formLogin")
+            print("Submitting form directly...")
+            login_form.submit()
+            print("Form submitted successfully")
+        except Exception as e:
+            print(f"Form submission failed: {e}")
+
+            # Method 2: Click the login button
+            try:
+                print("Trying to click login button...")
+                login_btn = driver.find_element(By.ID, "btnLogin")
+                driver.execute_script("arguments[0].click();", login_btn)
+                print("Login button clicked using JavaScript")
+            except Exception as e2:
+                print(f"Button click also failed: {e2}")
+                raise Exception("Failed to submit login form using both methods")
+
         print("Login credentials entered...")
-        
-        # Wait for login to complete
+
+        # Wait for login to complete with better error handling
+        print("Waiting for login to complete...")
+        time.sleep(5)  # Give it time to process
+
+        # Check for error messages
+        print("Checking for error messages...")
+        try:
+            # Check various possible error message locations
+            error_selectors = [
+                ".toast-message",
+                ".sweet-alert.show",
+                ".error",
+                ".alert-danger",
+                ".validation-summary-errors",
+                "[data-valmsg-summary='true']"
+            ]
+
+            for selector in error_selectors:
+                try:
+                    error_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if error_elements:
+                        for error in error_elements:
+                            if error.is_displayed() and error.text.strip():
+                                print(f"Error found ({selector}): {error.text}")
+                except:
+                    pass
+
+            # Check page source for error indicators
+            page_source = driver.page_source
+            if "Invalid" in page_source or "incorrect" in page_source.lower():
+                print("Page source indicates invalid credentials")
+            if "locked" in page_source.lower():
+                print("Page source indicates account is locked")
+            if "required" in page_source.lower():
+                print("Page source indicates required fields missing")
+
+        except Exception as e:
+            print(f"Could not check for error messages: {e}")
+
+        # Check current URL and page state
+        current_url = driver.current_url
+        print(f"Current URL after login attempt: {current_url}")
+
+        # Check if we're still on login page
+        if "Login" in current_url:
+            # Try to get more info about why login failed
+            try:
+                page_text = driver.find_element(By.TAG_NAME, "body").text
+                if "Invalid" in page_text or "incorrect" in page_text.lower():
+                    print("Login appears to have failed due to invalid credentials")
+                elif "locked" in page_text.lower():
+                    print("Account appears to be locked")
+            except Exception:
+                pass
+
+            raise Exception(f"Login failed - still on login page. Current URL: {current_url}")
+
+        try:
+            # Wait for URL to change from login page
+            WebDriverWait(driver, 15).until(
+                lambda d: d.current_url != "https://fo.hospitality.mykg.id/" and
+                         d.current_url != "https://fo.hospitality.mykg.id"
+            )
+            print(f"Login successful! Current URL: {driver.current_url}")
+        except TimeoutException:
+            print("Warning: URL did not change after login, checking for login success indicators...")
+
+        # Additional wait for page to stabilize
         wait_for_page_load(driver)
         wait_for_toast_disappear(driver)
-        
+        time.sleep(2)  # Extra wait for session to establish
+
         print("Successfully logged in!")
-        
+
         # Navigate directly to Room Availability page
         print("Navigating to Room Availability page...")
         driver.get("https://fo.hospitality.mykg.id/RoomAvailable/index")
+
+        # Wait for navigation with better error handling
+        print("Waiting for page navigation...")
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: "RoomAvailable" in d.current_url or "room" in d.current_url.lower()
+            )
+            print(f"Successfully navigated to: {driver.current_url}")
+        except TimeoutException:
+            print(f"Warning: May not have reached Room Availability page. Current URL: {driver.current_url}")
+            # Check if we were redirected back to login
+            if "Login" in driver.current_url:
+                raise Exception("Session lost - redirected back to login page")
+
         wait_for_page_load(driver)
+        time.sleep(3)  # Wait for dynamic content to load
+
+        # Debug: Save page source and take screenshot before searching for date picker
+        print("Debug: Saving page source...")
+        page_source_path = os.path.join(data_dir, 'page_source.html')
+        with open(page_source_path, 'w', encoding='utf-8') as f:
+            f.write(driver.page_source)
+        print(f"Page source saved to {page_source_path}")
+
+        print("Debug: Taking screenshot...")
+        screenshot_path = os.path.join(data_dir, 'page_screenshot.png')
+        driver.save_screenshot(screenshot_path)
+        print(f"Screenshot saved to {screenshot_path}")
+
+        # Debug: List all input elements on the page
+        print("Debug: Listing all input elements on page...")
+        all_inputs = driver.find_elements(By.TAG_NAME, "input")
+        print(f"Found {len(all_inputs)} input elements:")
+        for i, inp in enumerate(all_inputs[:20]):  # Limit to first 20
+            print(f"  Input {i+1}: type='{inp.get_attribute('type')}', "
+                  f"id='{inp.get_attribute('id')}', name='{inp.get_attribute('name')}', "
+                  f"class='{inp.get_attribute('class')}', placeholder='{inp.get_attribute('placeholder')}'")
         
         # Wait for and click the date picker to open it
-        date_picker = wait_for_element_presence(driver, By.CSS_SELECTOR, "input[type='text'][readonly]", 
-                                              timeout=15, description="date picker input")
+        # Try multiple selectors for better reliability
+        date_picker_selectors = [
+            "input[placeholder*='Date' i]",
+            "input[placeholder*='date' i]",
+            ".input-group input[type='text'][readonly]",
+            "input[type='text'][readonly]:first-of-type",
+            "#txtDate",  # Common ID for date inputs
+        ]
+
+        date_picker = None
+        for selector in date_picker_selectors:
+            print(f"Trying selector: {selector}")
+            date_picker = wait_for_element_presence(driver, By.CSS_SELECTOR, selector,
+                                                  timeout=5, description="date picker input")
+            if date_picker:
+                print(f"Found date picker using selector: {selector}")
+                break
+
         if not date_picker:
-            raise Exception("Date picker input not found")
+            # Debug: list all readonly inputs on the page
+            print("Debug: Listing all readonly inputs on page...")
+            all_readonly_inputs = driver.find_elements(By.CSS_SELECTOR, "input[readonly]")
+            for i, inp in enumerate(all_readonly_inputs):
+                print(f"  Input {i+1}: placeholder='{inp.get_attribute('placeholder')}', "
+                      f"id='{inp.get_attribute('id')}', class='{inp.get_attribute('class')}', "
+                      f"value='{inp.get_attribute('value')}'")
+
+            # Fallback: find by XPath looking for calendar button structure
+            try:
+                print("Trying XPath fallback...")
+                date_picker = driver.find_element(By.XPATH,
+                    "//div[contains(@class, 'input-group')]//input[@readonly]/following-sibling::div[@class='input-group-btn']/button/preceding-sibling::input")
+                print("Found date picker using XPath fallback")
+            except Exception as e:
+                print(f"XPath fallback failed: {e}")
+                raise Exception("Date picker input not found - tried multiple selectors")
         
         # Wait for navbar to be fully loaded
         navbar = wait_for_element_presence(driver, By.CLASS_NAME, "navbar-fixed-top", 

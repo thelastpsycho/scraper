@@ -68,7 +68,8 @@ import {
   DocumentTextIcon,
   CircleStackIcon,
   ChartBarIcon,
-  ChatBubbleLeftRightIcon
+  ChatBubbleLeftRightIcon,
+  ArchiveBoxIcon
 } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
@@ -79,6 +80,7 @@ const navigation = [
   { name: 'Scraping', href: '/scraping', icon: DocumentTextIcon },
   { name: 'Data', href: '/data', icon: CircleStackIcon },
   { name: 'Yielder', href: '/yielder', icon: ChartBarIcon },
+  { name: 'Allotment', href: '/allotment', icon: ArchiveBoxIcon },
   { name: 'Chat', href: '/chat', icon: ChatBubbleLeftRightIcon },
 ]
 </script>

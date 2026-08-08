@@ -16,18 +16,18 @@
           </div>
         </div>
         <button
-          @click="triggerUpdate"
+          @click="triggerUpdate('deluxe')"
           :disabled="isUpdating"
           class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {{ isUpdating ? 'Updating...' : 'Update Allotment' }}
+          {{ isUpdating ? 'Updating...' : 'Update Deluxe' }}
         </button>
         <button
-          @click="triggerDomUpdate"
+          @click="triggerUpdate('premiere')"
           :disabled="isUpdating"
-          class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ml-2"
+          class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ml-2"
         >
-          {{ isUpdating ? 'Updating...' : 'Update Allotment (DOM)' }}
+          {{ isUpdating ? 'Updating...' : 'Update Premiere' }}
         </button>
       </div>
     </div>
@@ -88,6 +88,16 @@
             :disabled="isUpdating"
           />
         </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Max Dates (leave empty for full run)</label>
+          <input
+            v-model="maxDates"
+            type="number"
+            min="1"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            :disabled="isUpdating"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -100,7 +110,8 @@ import axios from '../plugins/axios'
 const isUpdating = ref(false)
 const statusMessage = ref('Ready to update allotment')
 const username = ref('krisnatha')
-const password = ref('Nasibungkus13')
+const password = ref('Nasibungkus13!!')
+const maxDates = ref<number | null>(null)
 const logs = ref<Array<{message: string, type: 'info' | 'success' | 'error', timestamp: Date}>>([])
 
 const formatTime = (date: Date) => {
@@ -126,24 +137,25 @@ const clearLogs = () => {
   logs.value = []
 }
 
-const triggerUpdate = async () => {
+const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
+  const roomLabel = roomType === 'deluxe' ? 'Deluxe' : 'Premiere'
   try {
     isUpdating.value = true
-    statusMessage.value = 'Updating allotment...'
-    addLog('Starting allotment update process...', 'info')
+    statusMessage.value = `Updating ${roomLabel} allotment...`
+    addLog(`Starting ${roomLabel} allotment update process...`, 'info')
 
     // Create EventSource for real-time updates
     const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
-    
+
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
       addLog(data.message, data.type)
-      
+
       if (data.type === 'success' || data.type === 'error') {
         eventSource.close()
         isUpdating.value = false
-        statusMessage.value = data.type === 'success' 
-          ? 'Allotment updated successfully!' 
+        statusMessage.value = data.type === 'success'
+          ? `${roomLabel} allotment updated successfully!`
           : `Error: ${data.message}`
       }
     }
@@ -158,49 +170,9 @@ const triggerUpdate = async () => {
     // Send credentials to start the process
     await axios.post('/api/update-allotment', {
       username: username.value,
-      password: password.value
-    })
-
-  } catch (error: any) {
-    addLog(`Error: ${error.response?.data?.message || error.message}`, 'error')
-    statusMessage.value = `Error: ${error.response?.data?.message || error.message}`
-    isUpdating.value = false
-  }
-}
-
-const triggerDomUpdate = async () => {
-  try {
-    isUpdating.value = true
-    statusMessage.value = 'Updating allotment via DOM...'
-    addLog('Starting DOM-based allotment update process...', 'info')
-
-    // Create EventSource for real-time updates
-    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
-    
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      addLog(data.message, data.type)
-      
-      if (data.type === 'success' || data.type === 'error') {
-        eventSource.close()
-        isUpdating.value = false
-        statusMessage.value = data.type === 'success' 
-          ? 'Allotment updated successfully (DOM)!' 
-          : `Error: ${data.message}`
-      }
-    }
-
-    eventSource.onerror = (error) => {
-      addLog('Connection error occurred', 'error')
-      eventSource.close()
-      isUpdating.value = false
-      statusMessage.value = 'Error: Connection lost'
-    }
-
-    // Send credentials to start the DOM-based process
-    await axios.post('/api/update-allotment-dom', {
-      username: username.value,
-      password: password.value
+      password: password.value,
+      room_type: roomType,
+      max_dates: maxDates.value || null
     })
 
   } catch (error: any) {
