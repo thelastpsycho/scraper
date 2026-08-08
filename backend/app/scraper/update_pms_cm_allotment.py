@@ -329,8 +329,16 @@ def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13!!
                 break
             except TimeoutException:
                 if attempt < max_attempts - 1:
-                    log(driver, f"Attempt {attempt + 1} failed, retrying...")
-                    time.sleep(2)  # Wait before retrying
+                    log(driver, f"Attempt {attempt + 1} failed, brand options never populated - reloading page and retrying...")
+                    # Use a fresh GET instead of driver.refresh() - refreshing a page reached via a
+                    # login POST can trigger Chrome's "Confirm Form Resubmission" dialog, which blocks
+                    # the reload silently (the stale DOM stays visible, so presence checks pass while
+                    # the page never actually re-fetches the data that populates the dropdown).
+                    driver.get(driver.current_url)
+                    wait_for_page_load(driver)
+                    WebDriverWait(driver, 15).until(
+                        EC.presence_of_element_located((By.ID, "className"))
+                    )
                 else:
                     raise Exception("Brand options failed to load after multiple attempts")
         
