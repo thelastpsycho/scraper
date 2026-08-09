@@ -43,14 +43,14 @@ class RealTimeStringIO(StringIO):
             finally:
                 self._is_capturing = False
 
-def scrape_with_progress(start_date=None):
+def scrape_with_progress(start_date=None, username=None, password=None):
     global scraping_active, scraping_error
     try:
         # Redirect stdout to capture print statements
         old_stdout = sys.stdout
         sys.stdout = RealTimeStringIO(scraping_progress)
-        
-        result = scrape_pms_inventory(start_date)
+
+        result = scrape_pms_inventory(start_date, username=username, password=password)
         
         # Restore stdout
         sys.stdout = old_stdout
@@ -76,11 +76,16 @@ def trigger_scrape():
     if scraping_active:
         return jsonify({"status": "error", "message": "Scraping already in progress"}), 409
     
-    # Get start date from request
+    # Get start date and credentials from request
     start_date = request.json.get('startDate')
     if not start_date:
         return jsonify({"status": "error", "message": "Start date is required"}), 400
-    
+
+    username = request.json.get('username')
+    password = request.json.get('password')
+    if not username or not password:
+        return jsonify({"status": "error", "message": "PMS username and password are required"}), 400
+
     # Reset error state
     scraping_error = None
     scraping_active = True
@@ -92,7 +97,7 @@ def trigger_scrape():
         except queue.Empty:
             break
     
-    scraping_thread = threading.Thread(target=scrape_with_progress, args=(start_date,))
+    scraping_thread = threading.Thread(target=scrape_with_progress, args=(start_date, username, password))
     scraping_thread.daemon = True
     scraping_thread.start()
     

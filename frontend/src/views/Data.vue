@@ -99,11 +99,11 @@
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-200 bg-white">
-                    <tr v-for="(row, index) in getDataForTab(tab.id)" :key="index" class="hover:bg-gray-50 transition-colors">
+                    <tr v-for="(row, index) in getDataForTab(tab.id)" :key="index" class="group hover:bg-gray-200 transition-colors">
                       <td
                         v-for="header in getHeadersForTab(tab.id)"
                         :key="header"
-                        class="whitespace-nowrap px-4 py-3 font-mono"
+                        class="whitespace-nowrap px-4 py-3 font-mono transition group-hover:brightness-90"
                         :class="[getCellClass(row[header]), getStickyClass(tab.id, header, false) || getRoomColorClass(tab.id, header, false)]"
                         :style="getStickyStyle(tab.id, header)"
                       >
@@ -205,6 +205,7 @@ const roomTypeColors: Record<string, { header: string; cell: string }> = {
   ASP: { header: 'bg-lime-100 text-lime-800', cell: 'bg-lime-50' },
   AVR: { header: 'bg-rose-100 text-rose-800', cell: 'bg-rose-50' },
   AVP: { header: 'bg-orange-100 text-orange-800', cell: 'bg-orange-50' },
+  'DLX+Pre': { header: 'bg-slate-200 text-slate-800', cell: 'bg-slate-100' },
 }
 
 // On the Allocation tab, Date and Season/Demand are pinned to the left (in this order) so
@@ -235,8 +236,9 @@ const getStickyClass = (tabId: string, header: string, isHeader: boolean) => {
   return `sticky ${z} ${bg} overflow-hidden text-ellipsis`
 }
 
-// Allocation tab's Date column shows "08Aug / 98.37%" (day+month, no year, plus occupancy)
-const getAllocationDateDisplay = (row: Record<string, any>) => {
+// Merges Date + occupancy into one cell, e.g. "08Aug / 98.37%" (day+month, no year, plus
+// occupancy). Used by both the Allocation and Combined tabs.
+const getDateWithOccupancyDisplay = (row: Record<string, any>) => {
   const d = new Date(row['Date'])
   let dateLabel = row['Date']
   if (!isNaN(d.getTime())) {
@@ -251,19 +253,22 @@ const getAllocationDateDisplay = (row: Record<string, any>) => {
 // Renders a cell's display value, handling the Allocation tab's virtual merged columns
 // (Date+Occupancy, Season+Demand) before falling back to the generic formatValue
 const getDisplayValue = (tabId: string, row: Record<string, any>, header: string) => {
-  if (tabId === 'allocation') {
-    if (header === 'Date') return getAllocationDateDisplay(row)
-    if (header === 'Season/Demand') return `${row['Season'] ?? '-'}/${row['Demand'] ?? '-'}`
+  if ((tabId === 'allocation' || tabId === 'combined') && header === 'Date') {
+    return getDateWithOccupancyDisplay(row)
+  }
+  if (tabId === 'allocation' && header === 'Season/Demand') {
+    return `${row['Season'] ?? '-'}/${row['Demand'] ?? '-'}`
   }
   return formatValue(row[header], header)
 }
 
-// On the Allocation tab, looks up a header's room-type abbreviation (its first word, e.g.
-// "DLX" from "DLX Rem") and returns the matching background color class. Scoped to the
-// Allocation tab only - other tabs' raw column names (e.g. PMS Raw's "ASP"/"AVR"/"BFS")
-// can coincidentally collide with these abbreviations without actually being related.
+// On the Allocation and Combined tabs, looks up a header's room-type abbreviation (its
+// first word, e.g. "DLX" from "DLX Rem", or just "DLX" on Combined) and returns the
+// matching background color class. Scoped to these two tabs only - the PMS Raw/Processed
+// tabs' raw column names (e.g. "ASP"/"AVR"/"BFS") can coincidentally collide with these
+// abbreviations without actually being related.
 const getRoomColorClass = (tabId: string, header: string, isHeader: boolean) => {
-  if (tabId !== 'allocation') return ''
+  if (tabId !== 'allocation' && tabId !== 'combined') return ''
   const abbrev = header.split(' ')[0]
   const colors = roomTypeColors[abbrev]
   if (!colors) return ''
@@ -397,8 +402,10 @@ const fetchData = async () => {
       combinedData.value = processedData;
 
       if (processedData.length > 0) {
+        // 'Occ%' is intentionally omitted - it's merged into the Date column (see
+        // getDateWithOccupancyDisplay). The value still lives in each row for that display.
         const columnOrder = [
-          'Date', 'Occ%', 'DLX', 'PRE', 'DLX+Pre', 'DLP', 'PKL', 'FPK',
+          'Date', 'DLX', 'PRE', 'DLX+Pre', 'DLP', 'PKL', 'FPK',
           'DLS', 'PRS', 'AVS', 'ASW', 'BFS', 'ASP', 'AVR', 'AVP'
         ];
         const firstRowKeys = Object.keys(processedData[0]);

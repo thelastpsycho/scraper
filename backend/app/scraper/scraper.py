@@ -133,15 +133,23 @@ def setup_driver():
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 
-def scrape_pms_inventory(start_date=None):
+def scrape_pms_inventory(start_date=None, username=None, password=None):
     """
-    Scrape PMS inventory data from the website
+    Scrape PMS inventory data from the website.
+
+    Credentials come from the caller (the /api/scrape request body); when not
+    passed they fall back to the PMS_USERNAME / PMS_PASSWORD env vars.
     """
+    username = username or os.environ.get("PMS_USERNAME", "")
+    password = password or os.environ.get("PMS_PASSWORD", "")
+    if not username or not password:
+        raise Exception("PMS username and password are required")
+
     # Get the absolute path to the data directory within the scraper folder
     current_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(current_dir, 'data')
     os.makedirs(data_dir, exist_ok=True)
-    
+
     driver = setup_driver()
     try:
         # Navigate to the website
@@ -161,11 +169,11 @@ def scrape_pms_inventory(start_date=None):
             EC.element_to_be_clickable((By.ID, "txtUsername"))
         )
         username_field.clear()
-        username_field.send_keys(os.environ.get("PMS_USERNAME", ""))
+        username_field.send_keys(username)
 
         password_field = driver.find_element(By.ID, "txtPassword")
         password_field.clear()
-        password_field.send_keys(os.environ.get("PMS_PASSWORD", ""))
+        password_field.send_keys(password)
 
         # Check for any additional required fields or tokens
         print("Checking for additional form fields...")

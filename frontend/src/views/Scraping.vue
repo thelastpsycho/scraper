@@ -29,6 +29,31 @@
               />
             </div>
 
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label for="pmsUsername" class="block text-sm font-medium text-gray-700 mb-1">PMS Username</label>
+                <input
+                  type="text"
+                  id="pmsUsername"
+                  v-model="username"
+                  autocomplete="username"
+                  placeholder="Username"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-app-accent bg-gray-50 text-app-tertiary"
+                />
+              </div>
+              <div>
+                <label for="pmsPassword" class="block text-sm font-medium text-gray-700 mb-1">PMS Password</label>
+                <input
+                  type="password"
+                  id="pmsPassword"
+                  v-model="password"
+                  autocomplete="current-password"
+                  placeholder="Password"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-app-accent bg-gray-50 text-app-tertiary"
+                />
+              </div>
+            </div>
+
             <button
               @click="startScraping"
               :disabled="isScraping"
@@ -201,6 +226,8 @@ const loadingProcessCM = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 const startDate = ref(new Date().toISOString().split('T')[0]) // Initialize with today's date
+const username = ref('')
+const password = ref('')
 
 const selectedFile = ref<File|null>(null)
 const uploading = ref(false)
@@ -215,6 +242,11 @@ const modalStatus = ref('')
 const modalStatusType = ref<'success'|'error'>('success')
 
 const startScraping = async () => {
+  if (!username.value || !password.value) {
+    error.value = 'Please enter your PMS username and password.'
+    return
+  }
+
   isScraping.value = true
   error.value = ''
   success.value = ''
@@ -222,10 +254,12 @@ const startScraping = async () => {
   currentOperation.value = 'Starting scraping process...'
 
   try {
-    // First make a POST request to start the scraping with date parameter
+    // First make a POST request to start the scraping with date + credentials
     console.log('Starting scraping process...')
     const response = await axios.post('/api/scrape', {
-      startDate: startDate.value // Use the selected date
+      startDate: startDate.value, // Use the selected date
+      username: username.value,
+      password: password.value
     })
     console.log('Scraping start response:', response.data)
     
