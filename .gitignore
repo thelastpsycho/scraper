@@ -51,3 +51,8 @@ coverage/
 
 # Graphify generated knowledge-graph output/cache
 graphify-out/
+
+# Scraper working data (SQLite DBs, CM upload, scraped page/screenshot artifacts).
+# Generated at runtime by the pipeline stages - not source. Keep the folder itself.
+backend/app/scraper/data/
+!backend/app/scraper/data/.gitkeep
