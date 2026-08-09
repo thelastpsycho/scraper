@@ -46,7 +46,7 @@ Each stage in `backend/app/scraper/` reads the previous stage's SQLite DB and wr
 5. **`yielder.py`** (`POST /api/yield`, or `POST /api/custom-yield` for a caller-supplied demand/threshold/room-cap config) — applies the yield/demand matrix to produce `inventory_allocation.db` (table `daily_inventory_allocation`).
 6. **`update_pms_cm_allotment.py`** (`POST /api/update-allotment`, Deluxe/Premiere) / **`update_rest_allotment.py`** (`POST /api/update-rest-allotment`, the other 11 room types) — separate Selenium flows that read the yielder's `inventory_allocation.db` (via `allocation_store.load_allocation_rows`) and push allotment changes *back* into the PMS. PMS credentials are passed per-request in the JSON body; when omitted they fall back to the `PMS_USERNAME` / `PMS_PASSWORD` env vars.
 
-The `scraper/data/` directory holds regenerated runtime data (SQLite DBs, plus scraper debug artifacts like `page_screenshot.png` / `page_source.html`). It is **gitignored** except for `.gitkeep` — pipeline stages overwrite the DBs (`if_exists='replace'`) on every run, so nothing there is source.
+The `scraper/data/` SQLite DBs (plus scraper debug artifacts like `page_screenshot.png` / `page_source.html`) are working data checked into git, not fixtures — pipeline stages overwrite the DBs (`if_exists='replace'`) on every run.
 
 ### Progress streaming
 
