@@ -8,11 +8,11 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException, ElementNotInteractableException
 import time
 import platform
-import csv
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
 from ..shared import log_queue
+from .allocation_store import load_allocation_rows
 
 # Room types not covered by update_pms_cm_allotment.py (Deluxe Room / Premiere Room).
 # Each maps to exactly one PMS checkbox value, verified live in the "Add Room" modal
@@ -240,9 +240,9 @@ def handle_sweet_alert(driver, timeout=10):
         return False
 
 
-def build_batches(csv_path):
+def build_batches(allocation_rows):
     """
-    Read the seasonal allocation CSV and produce a flat list of batch jobs
+    Read the daily allocation rows and produce a flat list of batch jobs
     that push all 11 REST_ROOM_TYPE_CONFIG room types to the PMS with as few
     "Add Room" modal submissions as possible.
 
@@ -258,14 +258,12 @@ def build_batches(csv_path):
     4. Chunk each group's date ranges into batches of up to MAX_DATE_RANGES_PER_SAVE.
     """
     rows = []
-    with open(csv_path, 'r') as file:
-        csv_reader = csv.DictReader(file)
-        for row in csv_reader:
-            date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
-            rows.append({
-                'date': date_obj.strftime('%m/%d/%Y'),
-                **{room_type: int(row[config['csv_column']]) for room_type, config in REST_ROOM_TYPE_CONFIG.items()}
-            })
+    for row in allocation_rows:
+        date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
+        rows.append({
+            'date': date_obj.strftime('%m/%d/%Y'),
+            **{room_type: int(row[config['csv_column']]) for room_type, config in REST_ROOM_TYPE_CONFIG.items()}
+        })
 
     # Step 1: per-room-type contiguous runs
     runs_by_room_type = {}
@@ -314,14 +312,17 @@ def build_batches(csv_path):
     return batches
 
 
-def update_rest_allotment(driver=None, username="krisnatha", password="Nasibungkus13!!", max_dates=None):
+def update_rest_allotment(driver=None, username=None, password=None, max_dates=None):
     """
     Login to the website, select the hotel brand, and push online-inventory allotment
     for all 11 REST_ROOM_TYPE_CONFIG room types (everything except Deluxe/Premiere,
     which are handled separately by update_pms_cm_allotment.py).
 
     max_dates: if set, only process the first N dates worth of batches (for testing).
+    Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
     """
+    username = username or os.environ.get("PMS_USERNAME", "")
+    password = password or os.environ.get("PMS_PASSWORD", "")
     try:
         if driver is None:
             driver = setup_driver()
@@ -471,12 +472,11 @@ def update_rest_allotment(driver=None, username="krisnatha", password="Nasibungk
         wait_for_page_load(driver)
         log(driver, "Successfully navigated to allotment detail page")
 
-        log(driver, "Reading CSV data and building batches...")
-        csv_path = os.path.join(os.path.dirname(__file__), 'data/daily_inventory_allocation_seasonal.csv')
+        log(driver, "Reading allocation data and building batches...")
         try:
-            batches = build_batches(csv_path)
+            batches = build_batches(load_allocation_rows())
         except Exception as e:
-            log(driver, f"Error reading CSV file: {str(e)}")
+            log(driver, f"Error reading allocation data: {str(e)}")
             raise
 
         if max_dates:

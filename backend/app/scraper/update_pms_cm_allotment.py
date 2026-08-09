@@ -8,11 +8,11 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException, ElementNotInteractableException
 import time
 import platform
-import csv
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
 from ..shared import log_queue
+from .allocation_store import load_allocation_rows
 
 def wait_for_toast_disappear(driver, timeout=10):
     """Wait for toast message to disappear"""
@@ -246,14 +246,17 @@ ROOM_TYPE_CONFIG = {
     "premiere": {"csv_column": "Premiere Online Inventory", "checkbox_value": "PRKG", "label": "Premiere"},
 }
 
-def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13!!", max_dates=None, room_type="deluxe"):
+def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe"):
     """
     Login to the website and select the hotel brand
     Returns True if successful, False otherwise
 
-    max_dates: if set, only process the first N dates from the CSV (for testing).
-    room_type: "deluxe" or "premiere" - which CSV column/room-type checkbox to update.
+    max_dates: if set, only process the first N dates from the allocation DB (for testing).
+    room_type: "deluxe" or "premiere" - which column/room-type checkbox to update.
+    Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
     """
+    username = username or os.environ.get("PMS_USERNAME", "")
+    password = password or os.environ.get("PMS_PASSWORD", "")
     room_config = ROOM_TYPE_CONFIG[room_type]
     try:
         # If no driver is provided, create a new one
@@ -432,28 +435,23 @@ def update_allotmet(driver=None, username="krisnatha", password="Nasibungkus13!!
         wait_for_page_load(driver)
         log(driver, "Successfully navigated to allotment detail page")
         
-        # Read and process CSV data
-        log(driver, "Reading CSV data...")
+        # Read and process allocation data
+        log(driver, "Reading allocation data...")
         date_inventory = []
         try:
-            csv_path = os.path.join(os.path.dirname(__file__), 'data/daily_inventory_allocation_seasonal.csv')
-            log(driver, f"Attempting to open CSV file at: {csv_path}")
-            
-            with open(csv_path, 'r') as file:
-                csv_reader = csv.DictReader(file)
-                for row in csv_reader:
-                    date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
-                    formatted_date = date_obj.strftime('%m/%d/%Y')
-                    date_inventory.append({
-                        'date': formatted_date,
-                        'inventory': int(row[room_config['csv_column']])
-                    })
-                log(driver, f"Successfully read {len(date_inventory)} dates from CSV")
-                if max_dates:
-                    date_inventory = date_inventory[:max_dates]
-                    log(driver, f"Limiting test run to first {len(date_inventory)} dates")
+            for row in load_allocation_rows():
+                date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
+                formatted_date = date_obj.strftime('%m/%d/%Y')
+                date_inventory.append({
+                    'date': formatted_date,
+                    'inventory': int(row[room_config['csv_column']])
+                })
+            log(driver, f"Successfully read {len(date_inventory)} dates from allocation DB")
+            if max_dates:
+                date_inventory = date_inventory[:max_dates]
+                log(driver, f"Limiting test run to first {len(date_inventory)} dates")
         except Exception as e:
-            log(driver, f"Error reading CSV file: {str(e)}")
+            log(driver, f"Error reading allocation data: {str(e)}")
             raise
         
         # Collapse consecutive same-inventory days into contiguous date ranges

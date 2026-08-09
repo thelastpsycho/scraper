@@ -37,16 +37,16 @@ CORS is hardcoded in `create_app()` to a fixed list of frontend origins (`localh
 
 ### Data pipeline
 
-Each stage in `backend/app/scraper/` reads the previous stage's SQLite DB and writes its own DB + CSV mirror into `backend/app/scraper/data/`. Endpoints check that the required upstream `.db` file exists before running, so stages must execute in order:
+Each stage in `backend/app/scraper/` reads the previous stage's SQLite DB and writes its own DB into `backend/app/scraper/data/`. SQLite is the single source of truth for every stage-to-stage handoff — stages no longer write per-run CSV mirrors. Endpoints check that the required upstream `.db` file exists before running, so stages must execute in order:
 
 1. **`scraper.py`** (`POST /api/scrape`) — Selenium logs into the PMS and scrapes room availability into `pms_inventory_raw.db`.
 2. **`process_pms_inventory.py`** — cleans the raw PMS data into `pms_inventory_processed.db`.
 3. **`process_cm_inventory.py`** (`POST /api/process-cm`) — processes a Channel Manager Excel file uploaded via `POST /api/upload-cm-excel` (saved as `data/cm_upload.xlsx`) into `cm_inventory_processed.db`.
 4. **`combine_inventory.py`** (`POST /api/combine-inventory`) — merges the two processed DBs into `combined_inventory.db`.
 5. **`yielder.py`** (`POST /api/yield`, or `POST /api/custom-yield` for a caller-supplied demand/threshold/room-cap config) — applies the yield/demand matrix to produce `inventory_allocation.db` (table `daily_inventory_allocation`).
-6. **`update_pms_cm_allotment.py`** / **`update_allotment_dom.py`** (`POST /api/update-allotment`, `POST /api/update-allotment-dom`) — separate Selenium flows that push allotment changes *back* into the PMS. PMS credentials are passed per-request in the JSON body, not stored in env/config.
+6. **`update_pms_cm_allotment.py`** (`POST /api/update-allotment`, Deluxe/Premiere) / **`update_rest_allotment.py`** (`POST /api/update-rest-allotment`, the other 11 room types) — separate Selenium flows that read the yielder's `inventory_allocation.db` (via `allocation_store.load_allocation_rows`) and push allotment changes *back* into the PMS. PMS credentials are passed per-request in the JSON body; when omitted they fall back to the `PMS_USERNAME` / `PMS_PASSWORD` env vars.
 
-The `scraper/data/` SQLite files and CSVs are working data (checked in), not fixtures — pipeline stages overwrite them (`if_exists='replace'`).
+The `scraper/data/` directory holds regenerated runtime data (SQLite DBs, plus scraper debug artifacts like `page_screenshot.png` / `page_source.html`). It is **gitignored** except for `.gitkeep` — pipeline stages overwrite the DBs (`if_exists='replace'`) on every run, so nothing there is source.
 
 ### Progress streaming
 

@@ -161,11 +161,11 @@ def scrape_pms_inventory(start_date=None):
             EC.element_to_be_clickable((By.ID, "txtUsername"))
         )
         username_field.clear()
-        username_field.send_keys("krisnatha")
+        username_field.send_keys(os.environ.get("PMS_USERNAME", ""))
 
         password_field = driver.find_element(By.ID, "txtPassword")
         password_field.clear()
-        password_field.send_keys("Nasibungkus13!!")
+        password_field.send_keys(os.environ.get("PMS_PASSWORD", ""))
 
         # Check for any additional required fields or tokens
         print("Checking for additional form fields...")
@@ -585,12 +585,7 @@ def scrape_pms_inventory(start_date=None):
         
         print("\nScraping completed successfully!")
         
-        # Save raw data to CSV
-        csv_path = os.path.join(data_dir, 'pms_inventory.csv')
-        df.to_csv(csv_path, index=False)
-        print(f"Raw data saved to {csv_path}")
-        
-        # Save to SQLite database
+        # Save to SQLite database (single source of truth for downstream stages)
         db_path = os.path.join(data_dir, 'pms_inventory_raw.db')
         conn = sqlite3.connect(db_path)
         

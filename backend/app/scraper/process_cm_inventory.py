@@ -36,12 +36,7 @@ def process_cm_inventory():
     # Convert date to YYYY-MM-DD format for consistency
     df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
 
-    # Save processed data to CSV in data directory
-    csv_path = os.path.join(data_dir, 'cm_inventory_processed.csv')
-    df.to_csv(csv_path, index=False)
-    print(f'Processed data saved to {csv_path}')
-
-    # Save to SQLite database in data directory
+    # Save to SQLite database (single source of truth for downstream stages)
     db_path = os.path.join(data_dir, 'cm_inventory_processed.db')
     
     # Connect to SQLite database

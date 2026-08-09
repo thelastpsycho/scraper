@@ -94,12 +94,7 @@ def combine_inventory_files():
         # Convert date back to string format for consistency
         combined_df['Date'] = combined_df['Date'].dt.strftime('%Y-%m-%d')
 
-        # Save the combined data to CSV in data directory
-        csv_path = os.path.join(data_dir, 'combined_inventory.csv')
-        combined_df.to_csv(csv_path, index=False)
-        print(f'Combined inventory saved to CSV: {csv_path}')
-
-        # Save to SQLite database
+        # Save to SQLite database (single source of truth for downstream stages)
         db_path = os.path.join(data_dir, 'combined_inventory.db')
         
         # Connect to SQLite database
