@@ -337,7 +337,8 @@ const calculateYield = async () => {
 const formatValue = (value: any, key: string) => {
   if (value === null || value === undefined) return '-'
   if (key.toLowerCase().includes('rate')) {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(value);
+    // BAR rates are rate-plan labels (e.g. "BAR4"), not currency amounts.
+    return value
   }
   if (typeof value === 'number') {
     if (key.toLowerCase().includes('occupancy')) return `${value.toFixed(1)}%`

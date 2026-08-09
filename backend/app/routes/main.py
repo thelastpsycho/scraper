@@ -323,13 +323,32 @@ def trigger_custom_yield():
                 "message": "Failed to load and clean data"
             }), 500
 
-        # Apply yield matrix with custom configuration
+        # Apply yield matrix with custom configuration. Custom yield only covers
+        # Deluxe and Premiere rooms, so the simple room types are skipped and the
+        # threshold percentages (e.g. 5 / 20) are converted to fractions.
         result = apply_yield_matrix(
             data,
-            very_low_threshold_pct=config['very_low_threshold_pct'],
-            low_threshold_pct=config['low_threshold_pct'],
-            room_caps=config['room_caps']
+            very_low_threshold_pct=config['very_low_threshold_pct'] / 100,
+            low_threshold_pct=config['low_threshold_pct'] / 100,
+            room_caps=config['room_caps'],
+            include_simple_rooms=False,
+            deluxe_override_occupancy=config['deluxe_override_occupancy'],
+            deluxe_override_premiere=config['deluxe_override_premiere'],
+            deluxe_override_amount=config['deluxe_override_amount']
         )
+
+        # Rename and select the Deluxe/Premiere output columns to match the
+        # frontend table headers (and the default /api/yield output).
+        result = result.rename(columns={
+            'Deluxe Room': 'Deluxe Remaining Inventory',
+            'Premiere Room': 'Premiere Remaining Inventory'
+        })
+        result = result[[
+            'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
+            'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
+            'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
+        ]]
+        result['Occupancy'] = result['Occupancy'].round(2)
 
         # Save to database
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'inventory_allocation.db')
