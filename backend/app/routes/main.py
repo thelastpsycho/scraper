@@ -5,6 +5,7 @@ from ..scraper.yielder import load_and_clean_data, apply_yield_matrix
 from ..scraper.process_cm_inventory import process_cm_inventory
 from ..scraper.update_pms_cm_allotment import update_allotmet
 from ..scraper.update_rest_allotment import update_rest_allotment
+from ..scraper.update_bar import update_bar
 from ..shared import log_queue
 import queue
 import threading
@@ -490,6 +491,7 @@ def trigger_update_allotment():
         password = data.get('password')
         room_type = data.get('room_type', 'deluxe')
         max_dates = data.get('max_dates')
+        headless = data.get('headless')
 
         if not username or not password:
             return jsonify({
@@ -513,7 +515,7 @@ def trigger_update_allotment():
                 })
 
                 # Call the update function
-                result = update_allotmet(username=username, password=password, room_type=room_type, max_dates=max_dates)
+                result = update_allotmet(username=username, password=password, room_type=room_type, max_dates=max_dates, headless=headless)
 
                 if result:
                     log_queue.put({
@@ -557,6 +559,7 @@ def trigger_update_rest_allotment():
         username = data.get('username')
         password = data.get('password')
         max_dates = data.get('max_dates')
+        headless = data.get('headless')
 
         if not username or not password:
             return jsonify({
@@ -572,7 +575,7 @@ def trigger_update_rest_allotment():
                     'message': 'Starting allotment update process for the rest of the room types...'
                 })
 
-                result = update_rest_allotment(username=username, password=password, max_dates=max_dates)
+                result = update_rest_allotment(username=username, password=password, max_dates=max_dates, headless=headless)
 
                 if result:
                     log_queue.put({
@@ -600,6 +603,97 @@ def trigger_update_rest_allotment():
         return jsonify({
             'status': 'success',
             'message': 'Update process started'
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@bp.route('/api/update-bar/stream')
+def stream_bar_logs():
+    """Stream BAR price-level update logs using Server-Sent Events"""
+    return Response(
+        stream_with_context(log_stream()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+@bp.route('/api/update-bar', methods=['POST'])
+def trigger_update_bar():
+    """Trigger the D-EDGE / Availpro BAR price-level update process.
+
+    Reads the yielder's inventory_allocation.db and pushes BAR levels onto the
+    extranet. Credentials are optional: they fall back to the DEDGE_USERNAME /
+    DEDGE_PASSWORD env vars, and login is skipped entirely when the persistent
+    Chrome profile already holds a valid session.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        username = data.get('username')
+        password = data.get('password')
+        rooms = data.get('rooms', ['deluxe', 'premiere'])
+        dry_run = bool(data.get('dry_run', False))
+        max_levels_per_room = data.get('max_levels_per_room')
+        headless = data.get('headless')
+
+        if isinstance(rooms, str):
+            rooms = [rooms]
+        invalid = [r for r in rooms if r not in ('deluxe', 'premiere')]
+        if invalid:
+            return jsonify({
+                'status': 'error',
+                'message': f'Invalid room(s) {invalid}; allowed values are "deluxe" and "premiere"'
+            }), 400
+
+        # Start update process in a separate thread
+        def update_process():
+            try:
+                log_queue.put({
+                    'type': 'info',
+                    'message': f'Starting BAR price-level update ({", ".join(rooms)})'
+                             + (' [dry-run]' if dry_run else '') + '...'
+                })
+
+                result = update_bar(
+                    username=username,
+                    password=password,
+                    rooms=tuple(rooms),
+                    dry_run=dry_run,
+                    max_levels_per_room=max_levels_per_room,
+                    headless=headless,
+                )
+
+                if result:
+                    log_queue.put({
+                        'type': 'success',
+                        'message': 'BAR price levels updated successfully!'
+                    })
+                else:
+                    log_queue.put({
+                        'type': 'error',
+                        'message': 'Failed to update BAR price levels'
+                    })
+            except Exception as e:
+                log_queue.put({
+                    'type': 'error',
+                    'message': f'Error during BAR update: {str(e)}'
+                })
+            finally:
+                # Signal the end of streaming
+                log_queue.put(None)
+
+        thread = threading.Thread(target=update_process)
+        thread.start()
+
+        return jsonify({
+            'status': 'success',
+            'message': 'BAR update process started'
         })
 
     except Exception as e:

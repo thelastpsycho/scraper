@@ -102,8 +102,14 @@ def wait_and_click(driver, by, value, timeout=10, description="element"):
         return False
 
 
-def setup_driver():
+def setup_driver(headless=None):
     chrome_options = Options()
+    # Headless when the caller asks for it, else fall back to the SELENIUM_HEADLESS
+    # env var (1/true/yes). Keeps the browser watchable for debugging by default.
+    if headless is None:
+        headless = os.environ.get('SELENIUM_HEADLESS', '').lower() in ('1', 'true', 'yes')
+    if headless:
+        chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -312,7 +318,7 @@ def build_batches(allocation_rows):
     return batches
 
 
-def update_rest_allotment(driver=None, username=None, password=None, max_dates=None):
+def update_rest_allotment(driver=None, username=None, password=None, max_dates=None, headless=None):
     """
     Login to the website, select the hotel brand, and push online-inventory allotment
     for all 11 REST_ROOM_TYPE_CONFIG room types (everything except Deluxe/Premiere,
@@ -325,7 +331,7 @@ def update_rest_allotment(driver=None, username=None, password=None, max_dates=N
     password = password or os.environ.get("PMS_PASSWORD", "")
     try:
         if driver is None:
-            driver = setup_driver()
+            driver = setup_driver(headless=headless)
 
         driver.get("https://fo.hospitality.mykg.id/")
         log(driver, "Navigating to Hospitality Suite website...")

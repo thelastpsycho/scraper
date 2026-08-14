@@ -5,12 +5,9 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
-    host: '0.0.0.0', // Listen on all addresses
-    hmr: {
-      clientPort: 5173, // Force client to use this port
-      host: 'localhost', // Change this from 'localhost' to '0.0.0.0'
-      protocol: 'ws'
-    },
+    host: '0.0.0.0', // Listen on all addresses (exposes the dev server to the LAN)
+    // No hmr.host override: let the HMR websocket use whatever host the page was
+    // loaded from, so live-reload works for remote devices, not just localhost.
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:5666',

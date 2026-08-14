@@ -1,15 +1,15 @@
 <template>
-  <div class="h-screen bg-app-primary text-app-tertiary p-4 flex flex-col">
-    <div class="w-full h-full flex flex-col bg-white rounded-xl shadow-md overflow-hidden">
+  <div class="flex h-[calc(100dvh-4rem)] flex-col p-4 sm:p-6 lg:h-screen lg:p-8">
+    <div class="flex h-full w-full flex-col overflow-hidden rounded-xl bg-app-primary shadow-neu">
       <!-- Loading state -->
-      <div v-if="loading" class="flex-1 flex flex-col items-center justify-center">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-app-accent"></div>
-        <p class="mt-4 text-app-tertiary font-semibold">Loading data...</p>
+      <div v-if="loading" class="flex flex-1 flex-col items-center justify-center">
+        <div class="h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-app-accent"></div>
+        <p class="mt-4 text-sm font-semibold text-slate-500">Loading data…</p>
       </div>
 
       <!-- Error state -->
       <div v-else-if="error" class="p-6">
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md" role="alert">
+        <div class="rounded-xl bg-app-primary p-4 text-rose-700 shadow-neu-inset-sm" role="alert">
           <div class="flex items-center">
             <div class="flex-shrink-0">
               <svg class="h-5 w-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
@@ -26,25 +26,25 @@
       <!-- Data Content -->
       <template v-else>
         <!-- Compact Header & Tabs -->
-        <div class="p-4 border-b border-gray-200 flex-shrink-0">
+        <div class="flex-shrink-0 border-b border-slate-200 p-4 sm:px-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 class="text-xl font-bold text-app-tertiary">Data Overview</h1>
-              <p class="text-sm text-gray-500">Explore your scraped and processed inventory data.</p>
+              <h1 class="font-semibold text-lg text-app-tertiary">Data overview</h1>
+              <p class="text-sm text-slate-500">Explore your scraped and processed inventory data.</p>
             </div>
-            <div class="bg-gray-100 p-1.5 rounded-lg flex space-x-1">
+            <div class="flex space-x-1.5 rounded-xl bg-app-primary p-1.5 shadow-neu-inset-sm">
               <button
                 v-for="tab in tabs"
                 :key="tab.id"
                 @click="activeTab = tab.id"
                 :class="[
                   activeTab === tab.id
-                    ? 'bg-white text-app-accent shadow-sm'
-                    : 'text-gray-600 hover:bg-white/60 hover:text-gray-800',
-                  'whitespace-nowrap py-2 px-3 rounded-md font-medium text-xs transition-all duration-200 ease-in-out flex items-center'
+                    ? 'bg-app-primary text-app-accent shadow-neu-sm'
+                    : 'text-slate-500 hover:text-app-tertiary',
+                  'flex items-center whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-200 cursor-pointer'
                 ]"
               >
-                <component :is="tab.icon" class="h-4 w-4 mr-1.5" />
+                <component :is="tab.icon" class="mr-1.5 h-4 w-4" />
                 <span>{{ tab.name }}</span>
               </button>
             </div>
@@ -52,59 +52,63 @@
         </div>
 
         <!-- Tab content -->
-        <div class="p-6 flex-1 flex flex-col overflow-hidden">
+        <div class="flex flex-1 flex-col overflow-hidden p-4 sm:p-6">
           <div v-for="tab in tabs" :key="`${tab.id}-content`" class="h-full">
-            <div v-if="activeTab === tab.id" class="h-full flex flex-col">
-              <div class="flex flex-wrap items-center justify-between gap-4 mb-4 flex-shrink-0">
+            <div v-if="activeTab === tab.id" class="flex h-full flex-col">
+              <div class="mb-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h3 class="text-lg font-semibold text-app-tertiary">{{ tab.name }}</h3>
-                  <p class="text-sm text-gray-500">{{ tab.description }}</p>
+                  <h3 class="font-semibold text-base text-app-tertiary">{{ tab.name }}</h3>
+                  <p class="text-sm text-slate-500">{{ tab.description }}</p>
                 </div>
-                <div class="flex items-center space-x-2">
-                   <button @click="exportData(tab.id, 'csv')" class="p-2 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors" title="Export CSV">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-slate-500">Export</span>
+                  <button @click="exportData(tab.id, 'csv')" class="btn-icon" title="Export CSV">
                     <DocumentArrowDownIcon class="h-5 w-5" />
                   </button>
-                  <button @click="exportData(tab.id, 'excel')" class="p-2 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors" title="Export Excel">
+                  <button @click="exportData(tab.id, 'excel')" class="btn-icon" title="Export Excel">
                     <TableCellsIcon class="h-5 w-5" />
                   </button>
-                  <button @click="exportData(tab.id, 'json')" class="p-2 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors" title="Export JSON">
+                  <button @click="exportData(tab.id, 'json')" class="btn-icon" title="Export JSON">
                     <CodeBracketIcon class="h-5 w-5" />
                   </button>
                 </div>
               </div>
 
-              <div v-if="getDataForTab(tab.id).length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-500">
-                <p>No data available for this view.</p>
+              <div v-if="getDataForTab(tab.id).length === 0" class="flex flex-1 flex-col items-center justify-center text-center text-slate-500">
+                <span class="flex h-16 w-16 items-center justify-center rounded-xl bg-app-primary text-slate-400 shadow-neu-inset">
+                  <CircleStackIcon class="h-8 w-8" />
+                </span>
+                <p class="mt-4 text-sm font-semibold text-slate-600">No data available for this view.</p>
                 <p class="text-sm">Please ensure the required data processing steps have been completed.</p>
               </div>
 
-              <div v-else class="flex-1 overflow-auto border border-gray-200 rounded-lg">
-                <table class="min-w-full divide-y divide-gray-200" :class="tab.id === 'allocation' ? 'text-xs' : 'text-sm'">
-                  <thead class="bg-gray-50 sticky top-0 z-10">
+              <div v-else class="flex-1 overflow-auto rounded-xl bg-app-primary p-1 shadow-neu-inset">
+                <table class="min-w-full divide-y divide-slate-200" :class="tab.id === 'allocation' ? 'text-xs' : 'text-sm'">
+                  <thead class="bg-app-primary sticky top-0 z-10">
                     <tr>
                       <th
                         v-for="header in getHeadersForTab(tab.id)"
                         :key="header"
                         scope="col"
-                        class="py-3.5 px-4 text-left font-semibold text-gray-900 cursor-pointer hover:bg-gray-100 group"
+                        class="py-3.5 px-4 text-left font-bold uppercase tracking-wider text-[11px] text-slate-500 cursor-pointer hover:text-app-accent group"
                         :class="getStickyClass(tab.id, header, true) || getRoomColorClass(tab.id, header, true)"
                         :style="getStickyStyle(tab.id, header)"
                         @click="sortTab(tab.id, header)"
                       >
                         <div class="flex items-center space-x-2">
                           <span>{{ header.replace(/_/g, ' ') }}</span>
-                          <span v-if="sortColumn === header">{{ sortDirection === 'asc' ? '▲' : '▼' }}</span>
+                          <span v-if="sortColumn === header" class="text-app-accent">{{ sortDirection === 'asc' ? '▲' : '▼' }}</span>
                         </div>
                       </th>
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-gray-200 bg-white">
-                    <tr v-for="(row, index) in getDataForTab(tab.id)" :key="index" class="group hover:bg-gray-200 transition-colors">
+                  <tbody class="divide-y divide-slate-200">
+                    <tr v-for="(row, index) in getDataForTab(tab.id)" :key="index" class="group hover:bg-app-secondary/50 transition-colors">
                       <td
                         v-for="header in getHeadersForTab(tab.id)"
                         :key="header"
-                        class="whitespace-nowrap px-4 py-3 font-mono transition group-hover:brightness-90"
-                        :class="[getCellClass(row[header]), getStickyClass(tab.id, header, false) || getRoomColorClass(tab.id, header, false)]"
+                        class="whitespace-nowrap px-4 py-3 font-mono transition"
+                        :class="[getCellClass(row[header]), getStickyClass(tab.id, header, false) || getRoomColorClass(tab.id, header, false), getOnlineInventoryClass(tab.id, header, row[header])]"
                         :style="getStickyStyle(tab.id, header)"
                       >
                         {{ getDisplayValue(tab.id, row, header) }}
@@ -132,6 +136,7 @@ import {
   CalculatorIcon,
   DocumentArrowDownIcon,
   CodeBracketIcon,
+  CircleStackIcon,
 } from '@heroicons/vue/24/outline'
 
 // Data refs
@@ -192,20 +197,20 @@ const roomTypeOrder = ['DLX', 'PRE', 'DLP', 'PKL', 'FPK', 'DLS', 'PRS', 'AVS', '
 
 // One distinct pastel color per room-type abbreviation, applied to its header + cells
 const roomTypeColors: Record<string, { header: string; cell: string }> = {
-  DLX: { header: 'bg-blue-100 text-blue-800', cell: 'bg-blue-50' },
-  PRE: { header: 'bg-purple-100 text-purple-800', cell: 'bg-purple-50' },
-  DLP: { header: 'bg-cyan-100 text-cyan-800', cell: 'bg-cyan-50' },
-  PKL: { header: 'bg-teal-100 text-teal-800', cell: 'bg-teal-50' },
-  FPK: { header: 'bg-pink-100 text-pink-800', cell: 'bg-pink-50' },
-  DLS: { header: 'bg-indigo-100 text-indigo-800', cell: 'bg-indigo-50' },
-  PRS: { header: 'bg-violet-100 text-violet-800', cell: 'bg-violet-50' },
-  AVS: { header: 'bg-amber-100 text-amber-800', cell: 'bg-amber-50' },
-  ASW: { header: 'bg-sky-100 text-sky-800', cell: 'bg-sky-50' },
-  BFS: { header: 'bg-emerald-100 text-emerald-800', cell: 'bg-emerald-50' },
-  ASP: { header: 'bg-lime-100 text-lime-800', cell: 'bg-lime-50' },
-  AVR: { header: 'bg-rose-100 text-rose-800', cell: 'bg-rose-50' },
-  AVP: { header: 'bg-orange-100 text-orange-800', cell: 'bg-orange-50' },
-  'DLX+Pre': { header: 'bg-slate-200 text-slate-800', cell: 'bg-slate-100' },
+  DLX: { header: 'bg-blue-200/60 text-blue-700', cell: 'bg-blue-100/40' },
+  PRE: { header: 'bg-purple-200/60 text-purple-700', cell: 'bg-purple-100/40' },
+  DLP: { header: 'bg-cyan-200/60 text-cyan-700', cell: 'bg-cyan-100/40' },
+  PKL: { header: 'bg-teal-200/60 text-teal-700', cell: 'bg-teal-100/40' },
+  FPK: { header: 'bg-pink-200/60 text-pink-700', cell: 'bg-pink-100/40' },
+  DLS: { header: 'bg-indigo-200/60 text-indigo-700', cell: 'bg-indigo-100/40' },
+  PRS: { header: 'bg-violet-200/60 text-violet-700', cell: 'bg-violet-100/40' },
+  AVS: { header: 'bg-amber-200/60 text-amber-700', cell: 'bg-amber-100/40' },
+  ASW: { header: 'bg-sky-200/60 text-sky-700', cell: 'bg-sky-100/40' },
+  BFS: { header: 'bg-emerald-200/60 text-emerald-700', cell: 'bg-emerald-100/40' },
+  ASP: { header: 'bg-lime-200/60 text-lime-700', cell: 'bg-lime-100/40' },
+  AVR: { header: 'bg-rose-200/60 text-rose-700', cell: 'bg-rose-100/40' },
+  AVP: { header: 'bg-orange-200/60 text-orange-700', cell: 'bg-orange-100/40' },
+  'DLX+Pre': { header: 'bg-slate-300/70 text-slate-700', cell: 'bg-slate-200/50' },
 }
 
 // On the Allocation tab, Date and Season/Demand are pinned to the left (in this order) so
@@ -231,7 +236,7 @@ const getStickyStyle = (tabId: string, header: string) => {
 
 const getStickyClass = (tabId: string, header: string, isHeader: boolean) => {
   if (tabId !== 'allocation' || !(header in STICKY_COLUMN_WIDTHS)) return ''
-  const bg = isHeader ? 'bg-gray-50' : 'bg-white'
+  const bg = 'bg-app-primary'
   const z = isHeader ? 'z-20' : 'z-10'
   return `sticky ${z} ${bg} overflow-hidden text-ellipsis`
 }
@@ -275,6 +280,16 @@ const getRoomColorClass = (tabId: string, header: string, isHeader: boolean) => 
   return isHeader ? colors.header : colors.cell
 }
 
+// On the Allocation tab, flag any Online Inventory cell (columns renamed with the
+// ' On' suffix, e.g. "DLX On") that has dropped below 1 with a red highlight.
+// Uses ! utilities so it overrides the room-type tint and generic cell text color.
+const getOnlineInventoryClass = (tabId: string, header: string, value: any) => {
+  if (tabId !== 'allocation' || !header.endsWith(' On')) return ''
+  const num = Number(value)
+  if (isNaN(num) || num >= 1) return ''
+  return '!bg-red-100 !text-red-700 !font-semibold'
+}
+
 // Data Accessors
 const getDataForTab = (tabId: string) => {
   switch (tabId) {
@@ -312,13 +327,13 @@ const formatValue = (value: any, key: string) => {
 
 const getCellClass = (value: any) => {
   const num = Number(value)
-  if (isNaN(num)) return 'text-gray-700'
-  
-  if (num < 0) return 'text-red-600 font-semibold'
+  if (isNaN(num)) return 'text-slate-600'
+
+  if (num < 0) return 'text-rose-600 font-bold'
   if (num === 0) return 'text-orange-600 font-semibold'
-  if (num >= 1 && num <= 5) return 'text-yellow-600'
-  
-  return 'text-gray-800'
+  if (num >= 1 && num <= 5) return 'text-amber-600 font-semibold'
+
+  return 'text-slate-700'
 }
 
 // Sorting logic

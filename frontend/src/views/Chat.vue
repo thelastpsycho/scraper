@@ -1,39 +1,44 @@
 <template>
-  <div class="h-screen bg-app-primary p-4 flex flex-col">
-    <div class="w-full max-w-3xl mx-auto h-full flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden">
+  <div class="flex h-[calc(100dvh-4rem)] flex-col p-4 sm:p-6 lg:h-screen lg:p-8">
+    <div class="mx-auto flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-app-primary shadow-neu">
       <!-- Header -->
-      <header class="flex items-center p-4 border-b border-gray-200 flex-shrink-0">
-        <ChatBubbleLeftRightIcon class="h-6 w-6 text-app-accent" />
-        <h1 class="text-xl font-bold text-app-tertiary ml-2">Room Availability Assistant</h1>
+      <header class="flex flex-shrink-0 items-center gap-3 border-b border-slate-200 px-5 py-4">
+        <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-app-primary text-app-accent shadow-neu-sm">
+          <ChatBubbleLeftRightIcon class="h-5 w-5" />
+        </span>
+        <div class="leading-tight">
+          <h1 class="font-semibold text-sm text-app-tertiary">Room availability assistant</h1>
+          <p class="text-xs text-slate-500">Ask about inventory by room type and date</p>
+        </div>
       </header>
 
       <!-- Chat Messages -->
       <div class="flex-1 overflow-y-auto p-6 space-y-6" ref="chatContainer">
         <div v-for="(msg, idx) in chatStore.messages.filter(m => m.role !== 'system')" :key="idx" class="flex items-start gap-3" :class="{'justify-end': msg.role === 'user'}">
           <!-- Assistant Avatar -->
-          <div v-if="msg.role === 'assistant'" class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-            <SparklesIcon class="h-5 w-5 text-app-accent" />
+          <div v-if="msg.role === 'assistant'" class="w-9 h-9 rounded-full bg-app-primary text-app-accent flex items-center justify-center flex-shrink-0 shadow-neu-sm">
+            <SparklesIcon class="h-5 w-5" />
           </div>
 
           <!-- Message Content -->
           <div class="max-w-lg">
-            <div class="rounded-xl p-3 text-sm" :class="msg.role === 'user' ? 'bg-app-accent text-white' : 'bg-gray-100 text-app-tertiary'">
+            <div class="rounded-xl px-4 py-3 text-sm" :class="msg.role === 'user' ? 'bg-app-accent text-white shadow-neu-sm' : 'bg-app-primary text-slate-700 shadow-neu-sm'">
               <div v-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>
               <p v-else>{{ msg.content }}</p>
             </div>
           </div>
 
           <!-- User Avatar -->
-          <div v-if="msg.role === 'user'" class="w-8 h-8 rounded-full bg-blue-200 flex items-center justify-center flex-shrink-0">
-            <UserIcon class="h-5 w-5 text-blue-800" />
+          <div v-if="msg.role === 'user'" class="w-9 h-9 rounded-full bg-app-primary text-app-accent flex items-center justify-center flex-shrink-0 shadow-neu-sm">
+            <UserIcon class="h-5 w-5" />
           </div>
         </div>
         <div v-if="loading" class="flex items-start gap-3">
-          <div class="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
-            <SparklesIcon class="h-5 w-5 text-app-accent" />
+          <div class="w-9 h-9 rounded-full bg-app-primary text-app-accent flex items-center justify-center flex-shrink-0 shadow-neu-sm">
+            <SparklesIcon class="h-5 w-5" />
           </div>
           <div class="max-w-lg">
-            <div class="rounded-xl p-3 bg-gray-100 text-app-tertiary">
+            <div class="rounded-xl px-4 py-3 bg-app-primary shadow-neu-sm">
               <div class="flex items-center space-x-1">
                 <span class="h-1.5 w-1.5 bg-app-accent rounded-full animate-bounce" style="animation-delay: 0s;"></span>
                 <span class="h-1.5 w-1.5 bg-app-accent rounded-full animate-bounce" style="animation-delay: 0.1s;"></span>
@@ -45,16 +50,16 @@
       </div>
 
       <!-- Input Form -->
-      <footer class="p-4 border-t border-gray-200 flex-shrink-0">
+      <footer class="flex-shrink-0 border-t border-slate-200 p-4">
         <form @submit.prevent="sendMessage" class="flex items-center gap-3">
           <input
             v-model="input"
-            class="flex-1 w-full px-4 py-2.5 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-app-accent bg-gray-50 text-app-tertiary text-sm"
-            placeholder="e.g., 'dlx and pre for next 3 days'"
+            class="w-full flex-1 rounded-full bg-app-primary px-5 py-2.5 text-sm text-app-tertiary shadow-neu-inset-sm transition placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-app-accent/40"
+            placeholder="e.g. 'dlx and pre for next 3 days'"
           />
           <button
             type="submit"
-            class="bg-app-accent text-white rounded-full p-2.5 hover:bg-opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+            class="flex-shrink-0 rounded-full bg-app-accent p-3 text-white shadow-neu-sm transition-all hover:brightness-110 active:shadow-neu-inset-sm disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
             :disabled="loading || !input"
           >
             <PaperAirplaneIcon class="h-5 w-5" />
@@ -290,36 +295,42 @@ async function sendMessage() {
 
 <style>
 .prose {
-  color: #374151;
+  color: #475569; /* slate-600 */
 }
 .prose a {
-  color: #4f46e5;
+  color: #0f172a; /* slate-900 */
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .prose strong {
-  color: #111827;
+  color: #0f172a; /* slate-900 */
 }
 
 .ai-chat-table {
   width: 100%;
   border-collapse: collapse;
   margin: 1em 0;
-  font-size: 0.875rem;
-  color: #374151; /* gray-700 */
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8125rem;
+  color: #475569; /* slate-600 */
 }
 .ai-chat-table th, .ai-chat-table td {
-  padding: 0.75rem;
+  padding: 0.6rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  border-bottom: 1px solid rgba(163, 177, 198, 0.4);
 }
 .ai-chat-table th {
-  font-weight: 600;
-  background-color: #f9fafb; /* gray-50 */
+  font-weight: 700;
+  color: #0f172a; /* slate-900 */
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
 }
 .ai-chat-table tr:last-child td {
   border-bottom: none;
 }
 .ai-chat-table td.negative-value {
-  color: #dc2626; /* red-600 */
-  font-weight: 600;
+  color: #e11d48; /* rose-600 */
+  font-weight: 700;
 }
 </style>

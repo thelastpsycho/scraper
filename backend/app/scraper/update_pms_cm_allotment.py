@@ -77,10 +77,15 @@ def wait_and_click(driver, by, value, timeout=10, description="element"):
         print(f"Error clicking {description}: {e}")
         return False
 
-def setup_driver():
+def setup_driver(headless=None):
     # Set up Chrome options
     chrome_options = Options()
-    # chrome_options.add_argument('--headless=new')
+    # Headless when the caller asks for it, else fall back to the SELENIUM_HEADLESS
+    # env var (1/true/yes). Keeps the browser watchable for debugging by default.
+    if headless is None:
+        headless = os.environ.get('SELENIUM_HEADLESS', '').lower() in ('1', 'true', 'yes')
+    if headless:
+        chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -246,13 +251,14 @@ ROOM_TYPE_CONFIG = {
     "premiere": {"csv_column": "Premiere Online Inventory", "checkbox_value": "PRKG", "label": "Premiere"},
 }
 
-def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe"):
+def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe", headless=None):
     """
     Login to the website and select the hotel brand
     Returns True if successful, False otherwise
 
     max_dates: if set, only process the first N dates from the allocation DB (for testing).
     room_type: "deluxe" or "premiere" - which column/room-type checkbox to update.
+    headless: run Chrome headless (None -> honour the SELENIUM_HEADLESS env var).
     Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
     """
     username = username or os.environ.get("PMS_USERNAME", "")
@@ -261,7 +267,7 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
     try:
         # If no driver is provided, create a new one
         if driver is None:
-            driver = setup_driver()
+            driver = setup_driver(headless=headless)
             should_quit_driver = False
         else:
             should_quit_driver = False

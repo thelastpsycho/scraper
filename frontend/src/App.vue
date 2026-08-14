@@ -12,9 +12,4 @@ import DashboardLayout from './components/DashboardLayout.vue'
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-.router-link-active {
-  color: #3b82f6;
-  border-bottom: 2px solid #3b82f6;
-}
 </style>

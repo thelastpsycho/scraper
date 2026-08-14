@@ -35,6 +35,9 @@ build/
 dist/
 coverage/
 
+# D-EDGE / Availpro persistent Chrome profile (holds live session + device-trust cookies)
+backend/app/scraper/.dedge_profile/
+
 # Environment variables
 .env.local
 .env.development.local

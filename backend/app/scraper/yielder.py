@@ -32,11 +32,11 @@ ROOM_CAPS = {
 # Room types that only get an online-inventory count (no BAR yielding), each
 # closed entirely once occupancy is near-full regardless of their own rule.
 SIMPLE_ROOM_TYPES = [k for k in ROOM_CAPS if k not in ('Deluxe Room', 'Premiere Room')]
-NEAR_FULL_OCCUPANCY_THRESHOLD = 95
+NEAR_FULL_OCCUPANCY_THRESHOLD = 97
 
 # Override configuration
 DELUXE_OVERRIDE_OCCUPANCY = 70  # Override threshold for occupancy
-DELUXE_OVERRIDE_PREMIERE = 61   # Override threshold for Premiere inventory
+DELUXE_OVERRIDE_PREMIERE = 31   # Override threshold for Premiere inventory
 DELUXE_OVERRIDE_AMOUNT = 2      # Amount of Deluxe rooms to open in override
 
 # Get the absolute path to the data directory within the scraper folder
@@ -87,10 +87,14 @@ def should_override_deluxe(occupancy, premiere_inventory, deluxe_inventory,
     """
     Determine if Deluxe inventory should be overridden based on conditions:
     1. Deluxe inventory is less than 1
-    2. AND (Occupancy is lower than occupancy_threshold
+    2. AND combined Deluxe+Premiere inventory is still > 0 (a Deluxe oversell can
+        be upgraded into Premiere, but only while the two categories together
+        still have rooms to sell — if the sum is <= 0 there is nothing left)
+    3. AND (Occupancy is lower than occupancy_threshold
         OR Premiere inventory is higher than premiere_threshold)
     """
     return (deluxe_inventory < 1 and
+            deluxe_inventory + premiere_inventory > 0 and
             (occupancy < occupancy_threshold or premiere_inventory > premiere_threshold))
 
 # Load and clean the dataset
@@ -231,51 +235,51 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
             'Normal': {
                 'High': {'bar': 'BAR4'},
                 'Medium': {'bar': 'BAR5'},
-                'Low': {'bar': 'BAR6'}
+                'Low': {'bar': 'BAR7'}
             },
             'Shoulder': {
                 'High': {'bar': 'BAR3'},
                 'Medium': {'bar': 'BAR4'},
-                'Low': {'bar': 'BAR5'}
+                'Low': {'bar': 'BAR6'}
             },
             'High': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
-                'Low': {'bar': 'BAR4'}
+                'Low': {'bar': 'BAR5'}
             },
             'Peak': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
-                'Low': {'bar': 'BAR3'}
+                'Low': {'bar': 'BAR4'}
             }
         },
         'Premiere Room': {
             'Normal': {
                 'High': {'bar': 'BAR4'},
                 'Medium': {'bar': 'BAR5'},
-                'Low': {'bar': 'BAR6'}
+                'Low': {'bar': 'BAR7'}
             },
             'Shoulder': {
                 'High': {'bar': 'BAR3'},
                 'Medium': {'bar': 'BAR4'},
-                'Low': {'bar': 'BAR5'}
+                'Low': {'bar': 'BAR6'}
             },
             'High': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
-                'Low': {'bar': 'BAR4'}
+                'Low': {'bar': 'BAR5'}
             },
             'Peak': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
-                'Low': {'bar': 'BAR3'}
+                'Low': {'bar': 'BAR4'}
             }
         }
     }
     
-    valid_bar_rates = {'BAR2', 'BAR3', 'BAR4', 'BAR5', 'BAR6'}
-    bar_rate_order = {'BAR6': 5, 'BAR5': 4, 'BAR4': 3, 'BAR3': 2, 'BAR2': 1}  # Lower number = more expensive
-    bar_rate_reverse = {1: 'BAR2', 2: 'BAR3', 3: 'BAR4', 4: 'BAR5', 5: 'BAR6'}
+    valid_bar_rates = {'BAR2', 'BAR3', 'BAR4', 'BAR5', 'BAR6', 'BAR7'}
+    bar_rate_order = {'BAR7': 6, 'BAR6': 5, 'BAR5': 4, 'BAR4': 3, 'BAR3': 2, 'BAR2': 1}  # Lower number = more expensive
+    bar_rate_reverse = {1: 'BAR2', 2: 'BAR3', 3: 'BAR4', 4: 'BAR5', 5: 'BAR6', 6: 'BAR7'}
     
     data['Deluxe Online Inventory'] = 0
     data['Deluxe BAR Rate'] = ''
@@ -308,11 +312,14 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
             low_threshold = capacity * low_threshold_pct
             
             base_rank = bar_rate_order.get(base_bar, 4)  # Default to BAR5 if invalid
+            # BAR2 (rank 1) is reserved for Peak/High seasons; Normal/Shoulder
+            # scarcity escalation is capped at BAR3 (rank 2).
+            min_rank = 1 if season in ('Peak', 'High') else 2
             if remaining_inventory <= very_low_threshold:
-                new_rank = max(1, base_rank - 2)  # Shift up 2 levels, cap at BAR2
+                new_rank = max(min_rank, base_rank - 2)  # Shift up 2 levels, seasonal ceiling
                 print(f"{row['Date'].strftime('%Y-%m-%d')} {room_type}: Remaining {remaining_inventory} (Very Low) → {base_bar} to {bar_rate_reverse[new_rank]}")
             elif remaining_inventory <= low_threshold:
-                new_rank = max(1, base_rank - 1)  # Shift up 1 level
+                new_rank = max(min_rank, base_rank - 1)  # Shift up 1 level, seasonal ceiling
                 print(f"{row['Date'].strftime('%Y-%m-%d')} {room_type}: Remaining {remaining_inventory} (Low) → {base_bar} to {bar_rate_reverse[new_rank]}")
             else:
                 new_rank = base_rank  # No change
@@ -322,7 +329,12 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         # Premiere Room
         room = 'Premiere Room'
         remaining = premiere_remaining
-        online_inventory = get_online_allotment(remaining, room_caps[room])
+        # A Deluxe oversell (negative) gets upgraded into Premiere and consumes
+        # real Premiere availability; a Deluxe surplus (positive) cannot, since
+        # there is no Premiere->Deluxe downgrade. So the effective count Premiere
+        # can actually sell is premiere_remaining minus any Deluxe oversell.
+        effective_remaining = premiere_remaining + min(deluxe_remaining, 0)
+        online_inventory = get_online_allotment(effective_remaining, room_caps[room])
         base_bar = yield_matrix[room][season][demand]['bar']
         if base_bar not in valid_bar_rates:
             print(f"Warning: Invalid Premiere BAR Rate '{base_bar}' for {row['Date'].strftime('%Y-%m-%d')}. Using BAR5.")
@@ -339,7 +351,8 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         # Check for override conditions
         if should_override_deluxe(row['Occupancy'], premiere_remaining, remaining,
                                   deluxe_override_occupancy, deluxe_override_premiere):
-            online_inventory = deluxe_override_amount
+            # Never open more than the combined Deluxe+Premiere slack can absorb.
+            online_inventory = min(deluxe_override_amount, remaining + premiere_remaining)
             print(f"{row['Date'].strftime('%Y-%m-%d')} Deluxe Room: Override applied - Opening {online_inventory} rooms (Occupancy: {row['Occupancy']:.2f}%, Premiere: {premiere_remaining}, Deluxe: {remaining})")
         else:
             online_inventory = get_online_allotment(remaining, room_caps[room])

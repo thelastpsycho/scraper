@@ -1,109 +1,248 @@
 <template>
-  <div class="container mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold mb-8">Allotment Update</h1>
-    
-    <!-- Status Card -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="text-xl font-semibold mb-2">Update Status</h2>
-          <p class="text-gray-600" v-if="!isUpdating">
-            {{ statusMessage }}
+  <div class="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
+    <PageHeader
+      title="Allotment"
+      subtitle="Push the calculated allotment changes back into the PMS."
+    />
+
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <!-- Left: actions + log -->
+      <div class="space-y-6 lg:col-span-2">
+        <!-- Status / Actions Card -->
+        <div class="neu-card p-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-base font-semibold text-app-tertiary">Update status</h2>
+              <p v-if="!isUpdating" class="mt-1 text-sm text-slate-500">{{ statusMessage }}</p>
+              <div v-else class="mt-1 flex items-center gap-2 text-sm text-slate-500">
+                <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-app-accent"></span>
+                Updating allotment…
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
+                Run headless
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="headless"
+                  :disabled="isUpdating"
+                  @click="headless = !headless"
+                  :class="[
+                    'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full shadow-neu-inset-sm transition-colors disabled:opacity-50',
+                    headless ? 'bg-app-accent' : 'bg-app-primary',
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-neu-sm transition-transform',
+                      headless ? 'translate-x-[20px]' : 'translate-x-0.5',
+                    ]"
+                  />
+                </button>
+              </label>
+              <span
+                :class="[
+                  'inline-flex items-center gap-1.5 rounded-full bg-app-primary px-3 py-1.5 text-xs font-semibold shadow-neu-inset-sm',
+                  isUpdating ? 'text-amber-700' : 'text-emerald-700',
+                ]"
+              >
+                <span :class="['h-1.5 w-1.5 rounded-full', isUpdating ? 'bg-amber-500' : 'bg-emerald-500']" />
+                {{ isUpdating ? 'Running' : 'Ready' }}
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <button
+              @click="triggerUpdate('deluxe')"
+              :disabled="isUpdating"
+              class="btn-flat !text-app-accent"
+            >
+              Update Deluxe
+            </button>
+            <button
+              @click="triggerUpdate('premiere')"
+              :disabled="isUpdating"
+              class="btn-flat !text-violet-600"
+            >
+              Update Premiere
+            </button>
+            <button
+              @click="triggerUpdateRest"
+              :disabled="isUpdating"
+              class="btn-flat !text-emerald-700"
+            >
+              Update the rest
+            </button>
+          </div>
+        </div>
+
+        <!-- BAR Pricing (D-EDGE) Card -->
+        <div class="neu-card p-6">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-base font-semibold text-app-tertiary">BAR pricing (D-EDGE)</h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Push the yielder's BAR price levels onto the Availpro extranet.
+              </p>
+            </div>
+            <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
+              Dry run
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="barDryRun"
+                :disabled="isUpdating"
+                @click="barDryRun = !barDryRun"
+                :class="[
+                  'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full shadow-neu-inset-sm transition-colors disabled:opacity-50',
+                  barDryRun ? 'bg-app-accent' : 'bg-app-primary',
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-neu-sm transition-transform',
+                    barDryRun ? 'translate-x-[20px]' : 'translate-x-0.5',
+                  ]"
+                />
+              </button>
+            </label>
+          </div>
+
+          <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <button
+              @click="triggerBarUpdate(['deluxe'])"
+              :disabled="isUpdating"
+              class="btn-flat !text-app-accent"
+            >
+              Update Deluxe BAR
+            </button>
+            <button
+              @click="triggerBarUpdate(['premiere'])"
+              :disabled="isUpdating"
+              class="btn-flat !text-violet-600"
+            >
+              Update Premiere BAR
+            </button>
+            <button
+              @click="triggerBarUpdate(['deluxe', 'premiere'])"
+              :disabled="isUpdating"
+              class="btn-flat !text-emerald-700"
+            >
+              Update both
+            </button>
+          </div>
+        </div>
+
+        <!-- Process Log Card -->
+        <div class="neu-card p-6">
+          <div class="mb-4 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-app-tertiary">Process log</h2>
+            <button
+              @click="clearLogs"
+              class="rounded-lg bg-app-primary px-2.5 py-1.5 text-xs font-semibold text-slate-500 shadow-neu-sm transition-all hover:text-app-accent active:shadow-neu-inset-sm disabled:opacity-50 cursor-pointer"
+              :disabled="isUpdating"
+            >
+              Clear logs
+            </button>
+          </div>
+          <div ref="logContainer" class="h-96 overflow-y-auto rounded-xl bg-app-primary p-4 shadow-neu-inset">
+            <div v-if="logs.length === 0" class="py-8 text-center text-sm text-slate-500">
+              No logs yet. Start an update to see live progress.
+            </div>
+            <div v-else class="space-y-1.5">
+              <div
+                v-for="(log, index) in logs"
+                :key="index"
+                class="flex items-start gap-2 font-mono text-xs"
+                :class="{
+                  'text-app-accent': log.type === 'info',
+                  'text-emerald-700': log.type === 'success',
+                  'text-rose-600': log.type === 'error'
+                }"
+              >
+                <span class="text-slate-500">{{ formatTime(log.timestamp) }}</span>
+                <span class="flex-1">{{ log.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Credentials Card -->
+      <div class="lg:col-span-1">
+        <div class="neu-card p-6">
+          <h2 class="text-base font-semibold text-app-tertiary">Credentials</h2>
+          <p class="mt-1 text-sm text-slate-500">PMS login used to push allotment changes.</p>
+          <div class="mt-5 space-y-4">
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-slate-600">Username</label>
+              <input
+                v-model="username"
+                type="text"
+                autocomplete="username"
+                placeholder="Username"
+                class="neu-input disabled:opacity-60"
+                :disabled="isUpdating"
+              />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-slate-600">Password</label>
+              <input
+                v-model="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Password"
+                class="neu-input disabled:opacity-60"
+                :disabled="isUpdating"
+              />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-slate-600">Max dates</label>
+              <input
+                v-model="maxDates"
+                type="number"
+                min="1"
+                placeholder="Leave empty for a full run"
+                class="neu-input disabled:opacity-60"
+                :disabled="isUpdating"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- D-EDGE Credentials Card -->
+        <div class="neu-card mt-6 p-6">
+          <h2 class="text-base font-semibold text-app-tertiary">D-EDGE credentials</h2>
+          <p class="mt-1 text-sm text-slate-500">
+            Availpro login for BAR pricing. Optional — leave blank to use the saved
+            session / server env vars.
           </p>
-          <div v-else class="flex items-center space-x-2">
-            <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
-            <span class="text-gray-600">Updating allotment...</span>
+          <div class="mt-5 space-y-4">
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-slate-600">Username</label>
+              <input
+                v-model="dedgeUsername"
+                type="text"
+                autocomplete="off"
+                placeholder="D-EDGE username"
+                class="neu-input disabled:opacity-60"
+                :disabled="isUpdating"
+              />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-sm font-semibold text-slate-600">Password</label>
+              <input
+                v-model="dedgePassword"
+                type="password"
+                autocomplete="off"
+                placeholder="D-EDGE password"
+                class="neu-input disabled:opacity-60"
+                :disabled="isUpdating"
+              />
+            </div>
           </div>
-        </div>
-        <button
-          @click="triggerUpdate('deluxe')"
-          :disabled="isUpdating"
-          class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {{ isUpdating ? 'Updating...' : 'Update Deluxe' }}
-        </button>
-        <button
-          @click="triggerUpdate('premiere')"
-          :disabled="isUpdating"
-          class="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ml-2"
-        >
-          {{ isUpdating ? 'Updating...' : 'Update Premiere' }}
-        </button>
-        <button
-          @click="triggerUpdateRest"
-          :disabled="isUpdating"
-          class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors ml-2"
-        >
-          {{ isUpdating ? 'Updating...' : 'Update the Rest' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Process Log Card -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold">Process Log</h2>
-        <button
-          @click="clearLogs"
-          class="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
-          :disabled="isUpdating"
-        >
-          Clear Logs
-        </button>
-      </div>
-      <div class="bg-gray-50 rounded-lg p-4 h-96 overflow-y-auto">
-        <div v-if="logs.length === 0" class="text-gray-500 text-center py-8">
-          No logs available. Start the update process to see logs.
-        </div>
-        <div v-else class="space-y-2">
-          <div
-            v-for="(log, index) in logs"
-            :key="index"
-            class="flex items-start space-x-2"
-            :class="{
-              'text-blue-600': log.type === 'info',
-              'text-green-600': log.type === 'success',
-              'text-red-600': log.type === 'error'
-            }"
-          >
-            <span class="text-gray-500 text-sm">{{ formatTime(log.timestamp) }}</span>
-            <span class="flex-1">{{ log.message }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Credentials Card -->
-    <div class="bg-white rounded-lg shadow-md p-6">
-      <h2 class="text-xl font-semibold mb-4">Credentials</h2>
-      <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-          <input
-            v-model="username"
-            type="text"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :disabled="isUpdating"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-          <input
-            v-model="password"
-            type="password"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :disabled="isUpdating"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Max Dates (leave empty for full run)</label>
-          <input
-            v-model="maxDates"
-            type="number"
-            min="1"
-            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :disabled="isUpdating"
-          />
         </div>
       </div>
     </div>
@@ -111,15 +250,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import axios from '../plugins/axios'
+import PageHeader from '../components/PageHeader.vue'
 
 const isUpdating = ref(false)
 const statusMessage = ref('Ready to update allotment')
-const username = ref('krisnatha')
-const password = ref('Nasibungkus13!!')
+const username = ref('')
+const password = ref('')
 const maxDates = ref<number | null>(null)
+const headless = ref(false)
+// TODO: prefilled for convenience — move server-side before shipping (ships to
+// the browser and is committed to git).
+const dedgeUsername = ref('ecommerce@theanvayabali.com')
+const dedgePassword = ref('Makingbelieves321`')
+const barDryRun = ref(false)
 const logs = ref<Array<{message: string, type: 'info' | 'success' | 'error', timestamp: Date}>>([])
+const logContainer = ref<HTMLElement | null>(null)
 
 const formatTime = (date: Date) => {
   return date.toLocaleTimeString()
@@ -131,13 +278,12 @@ const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') =>
     type,
     timestamp: new Date()
   })
-  // Auto scroll to bottom
-  setTimeout(() => {
-    const logContainer = document.querySelector('.overflow-y-auto')
-    if (logContainer) {
-      logContainer.scrollTop = logContainer.scrollHeight
-    }
-  }, 100)
+  // Keep the newest line in view (scroll the log panel, not the first
+  // scrollable element on the page).
+  nextTick(() => {
+    const el = logContainer.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
 }
 
 const clearLogs = () => {
@@ -152,7 +298,7 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
     addLog(`Starting ${roomLabel} allotment update process...`, 'info')
 
     // Create EventSource for real-time updates
-    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
+    const eventSource = new EventSource('/api/update-allotment/stream')
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
@@ -179,7 +325,8 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
       username: username.value,
       password: password.value,
       room_type: roomType,
-      max_dates: maxDates.value || null
+      max_dates: maxDates.value || null,
+      headless: headless.value
     })
 
   } catch (error: any) {
@@ -196,7 +343,7 @@ const triggerUpdateRest = async () => {
     addLog('Starting allotment update process for the rest of the room types...', 'info')
 
     // Create EventSource for real-time updates
-    const eventSource = new EventSource('http://127.0.0.1:5666/api/update-allotment/stream')
+    const eventSource = new EventSource('/api/update-allotment/stream')
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
@@ -222,7 +369,54 @@ const triggerUpdateRest = async () => {
     await axios.post('/api/update-rest-allotment', {
       username: username.value,
       password: password.value,
-      max_dates: maxDates.value || null
+      max_dates: maxDates.value || null,
+      headless: headless.value
+    })
+
+  } catch (error: any) {
+    addLog(`Error: ${error.response?.data?.message || error.message}`, 'error')
+    statusMessage.value = `Error: ${error.response?.data?.message || error.message}`
+    isUpdating.value = false
+  }
+}
+
+const triggerBarUpdate = async (rooms: Array<'deluxe' | 'premiere'>) => {
+  const roomLabel = rooms.map(r => r === 'deluxe' ? 'Deluxe' : 'Premiere').join(' + ')
+  try {
+    isUpdating.value = true
+    statusMessage.value = `Updating ${roomLabel} BAR pricing${barDryRun.value ? ' (dry run)' : ''}...`
+    addLog(`Starting ${roomLabel} BAR price-level update${barDryRun.value ? ' (dry run)' : ''}...`, 'info')
+
+    // Create EventSource for real-time updates
+    const eventSource = new EventSource('/api/update-bar/stream')
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      addLog(data.message, data.type)
+
+      if (data.type === 'success' || data.type === 'error') {
+        eventSource.close()
+        isUpdating.value = false
+        statusMessage.value = data.type === 'success'
+          ? `${roomLabel} BAR pricing updated successfully!`
+          : `Error: ${data.message}`
+      }
+    }
+
+    eventSource.onerror = () => {
+      addLog('Connection error occurred', 'error')
+      eventSource.close()
+      isUpdating.value = false
+      statusMessage.value = 'Error: Connection lost'
+    }
+
+    // Send request to start the process (D-EDGE credentials are optional)
+    await axios.post('/api/update-bar', {
+      username: dedgeUsername.value || null,
+      password: dedgePassword.value || null,
+      rooms,
+      dry_run: barDryRun.value,
+      headless: headless.value
     })
 
   } catch (error: any) {
@@ -232,27 +426,3 @@ const triggerUpdateRest = async () => {
   }
 }
 </script>
-
-<style scoped>
-.container {
-  max-width: 1200px;
-}
-
-.overflow-y-auto {
-  scrollbar-width: thin;
-  scrollbar-color: #CBD5E0 #F7FAFC;
-}
-
-.overflow-y-auto::-webkit-scrollbar {
-  width: 8px;
-}
-
-.overflow-y-auto::-webkit-scrollbar-track {
-  background: #F7FAFC;
-}
-
-.overflow-y-auto::-webkit-scrollbar-thumb {
-  background-color: #CBD5E0;
-  border-radius: 4px;
-}
-</style> 
