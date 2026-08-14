@@ -494,9 +494,15 @@ const fetchData = async () => {
 }
 
 // Export functionality
+const formatExportTimestamp = () => {
+  const now = new Date()
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
 const exportData = async (type: string, format: 'csv' | 'excel' | 'json') => {
   let data: any[] = getDataForTab(type);
-  let filename = type.replace(/-/g, '_');
+  const filename = `${type.replace(/-/g, '_')}_${formatExportTimestamp()}`;
 
   if (data.length === 0) {
     alert('No data available to export');
