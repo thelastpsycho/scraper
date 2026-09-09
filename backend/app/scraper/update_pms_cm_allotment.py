@@ -11,7 +11,7 @@ import platform
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
-from ..shared import log_queue
+from ..shared import log_queue, allotment_run_control
 from .allocation_store import load_allocation_rows
 
 def wait_for_toast_disappear(driver, timeout=10):
@@ -101,20 +101,28 @@ def setup_driver(headless=None):
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 
-def log(driver, message, type='info'):
-    """Log message to both console and browser, and send to queue for streaming"""
+def log(driver, message, type='info', progress=None):
+    """Log message to both console and browser, and send to queue for streaming
+
+    progress: optional (current, total) tuple describing overall batch progress,
+    forwarded to the frontend so it can render a progress bar.
+    """
     print(message)
     try:
         driver.execute_script(f"console.log({repr(message)})")
     except Exception as e:
         print(f"Could not log to browser console: {e}")
-    
+
     # Send log to queue for streaming
     try:
-        log_queue.put({
+        log_data = {
             'type': type,
             'message': message
-        })
+        }
+        if progress is not None:
+            current, total = progress
+            log_data['progress'] = {'current': current, 'total': total}
+        log_queue.put(log_data)
     except Exception as e:
         print(f"Could not send log to queue: {e}")
 
@@ -215,7 +223,18 @@ def add_date_range(driver, start_date, end_date):
     time.sleep(1)
     log(driver, "Successfully added date range")
 
-def handle_sweet_alert(driver, timeout=10):
+def dump_debug_artifacts(driver, name):
+    """Save a screenshot + page source so intermittent failures can be diagnosed after the fact"""
+    try:
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        driver.save_screenshot(os.path.join(data_dir, f'{name}_screenshot.png'))
+        with open(os.path.join(data_dir, f'{name}_page_source.html'), 'w', encoding='utf-8') as f:
+            f.write(driver.page_source)
+    except Exception as e:
+        log(driver, f"Could not save debug artifacts: {str(e)}")
+
+def handle_sweet_alert(driver, timeout=20):
     """Handle sweet alert dialog (this site uses SweetAlert v1, not SweetAlert2)"""
     try:
         # Wait for sweet alert to appear
@@ -240,11 +259,33 @@ def handle_sweet_alert(driver, timeout=10):
 
         return False
     except TimeoutException:
-        log(driver, "No sweet alert found within timeout period")
+        # Distinguish "no alert rendered at all" from "alert exists but never got the visible class"
+        # so the next occurrence's logs actually explain what happened
+        stale_alerts = driver.find_elements(By.CSS_SELECTOR, ".sweet-alert")
+        if stale_alerts:
+            log(driver, f"Sweet alert element present but not visible after {timeout}s (found {len(stale_alerts)})")
+        else:
+            log(driver, f"No sweet alert found within {timeout}s timeout period")
+        dump_debug_artifacts(driver, 'sweet_alert_timeout')
         return False
     except Exception as e:
         log(driver, f"Error handling sweet alert: {str(e)}")
+        dump_debug_artifacts(driver, 'sweet_alert_error')
         return False
+
+def check_stop_and_pause(driver):
+    """Cooperative cancellation point, checked once per batch. Blocks (without
+    closing the browser) while paused, and raises if a stop was requested."""
+    if allotment_run_control.pause_event.is_set():
+        log(driver, "Update paused - waiting to resume...")
+        while allotment_run_control.pause_event.is_set():
+            if allotment_run_control.stop_event.is_set():
+                break
+            time.sleep(1)
+        if not allotment_run_control.stop_event.is_set():
+            log(driver, "Resumed")
+    if allotment_run_control.stop_event.is_set():
+        raise Exception("Update stopped by user")
 
 ROOM_TYPE_CONFIG = {
     "deluxe": {"csv_column": "Deluxe Online Inventory", "checkbox_value": "DLT", "label": "Deluxe"},
@@ -485,12 +526,19 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
 
         # Process each inventory value, packing its ranges into batches of 5 rows per modal
         log(driver, "Processing date ranges in batches of 5 rows per inventory value...")
+        # total_batches below is scoped per inventory-value group (resets each group), so
+        # track a separate global counter across all groups for the frontend progress bar
+        total_batches_global = sum((len(v) + 4) // 5 for v in runs_by_value.values())
+        global_batch_counter = 0
         for inventory_value, value_runs in runs_by_value.items():
             total_batches = (len(value_runs) + 4) // 5
             for batch_start in range(0, len(value_runs), 5):
+                check_stop_and_pause(driver)
                 batch = value_runs[batch_start:batch_start+5]
                 batch_index = batch_start // 5
-                log(driver, f"\nProcessing inventory value {inventory_value}, batch {batch_index + 1} of {total_batches}")
+                global_batch_counter += 1
+                log(driver, f"\nProcessing inventory value {inventory_value}, batch {batch_index + 1} of {total_batches}",
+                    progress=(global_batch_counter, total_batches_global))
                 # Click Add Allotment Room button to open modal
                 if not wait_and_click(driver, By.ID, "btnAddRoom", description="Add Allotment Room button"):
                     raise Exception("Failed to click Add Allotment Room button")
@@ -570,7 +618,9 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
                     driver.execute_script("arguments[0].click();", save_button)
                 log(driver, "Clicked Save button")
                 time.sleep(1)
-                # Wait for and handle sweet alert
+                # Wait for and handle sweet alert. Note: we deliberately don't retry the
+                # Save click here - if the first click did register and the AJAX call is
+                # just slow, a second click would submit the same allotment twice.
                 if not handle_sweet_alert(driver):
                     log(driver, "Failed to handle sweet alert")
                     raise Exception("Failed to handle sweet alert")

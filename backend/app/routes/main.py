@@ -6,7 +6,7 @@ from ..scraper.process_cm_inventory import process_cm_inventory
 from ..scraper.update_pms_cm_allotment import update_allotmet
 from ..scraper.update_rest_allotment import update_rest_allotment
 from ..scraper.update_bar import update_bar
-from ..shared import log_queue
+from ..shared import log_queue, allotment_run_control
 import queue
 import threading
 import time
@@ -537,6 +537,7 @@ def trigger_update_allotment():
                 log_queue.put(None)
 
         # Start the update process in a background thread
+        allotment_run_control.reset()
         thread = threading.Thread(target=update_process)
         thread.start()
 
@@ -550,6 +551,24 @@ def trigger_update_allotment():
             'status': 'error',
             'message': str(e)
         }), 500
+
+@bp.route('/api/update-allotment/stop', methods=['POST'])
+def stop_update_allotment():
+    """Request the running Deluxe/Premiere/Rest allotment update to stop"""
+    allotment_run_control.stop_event.set()
+    return jsonify({'status': 'success', 'message': 'Stop requested'})
+
+@bp.route('/api/update-allotment/pause', methods=['POST'])
+def pause_update_allotment():
+    """Request the running Deluxe/Premiere/Rest allotment update to pause"""
+    allotment_run_control.pause_event.set()
+    return jsonify({'status': 'success', 'message': 'Pause requested'})
+
+@bp.route('/api/update-allotment/resume', methods=['POST'])
+def resume_update_allotment():
+    """Resume a paused Deluxe/Premiere/Rest allotment update"""
+    allotment_run_control.pause_event.clear()
+    return jsonify({'status': 'success', 'message': 'Resume requested'})
 
 @bp.route('/api/update-rest-allotment', methods=['POST'])
 def trigger_update_rest_allotment():
@@ -597,6 +616,7 @@ def trigger_update_rest_allotment():
                 log_queue.put(None)
 
         # Start the update process in a background thread
+        allotment_run_control.reset()
         thread = threading.Thread(target=update_process)
         thread.start()
 

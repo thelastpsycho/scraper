@@ -13,13 +13,35 @@
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 class="text-base font-semibold text-app-tertiary">Update status</h2>
-              <p v-if="!isUpdating" class="mt-1 text-sm text-slate-500">{{ statusMessage }}</p>
-              <div v-else class="mt-1 flex items-center gap-2 text-sm text-slate-500">
-                <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-app-accent"></span>
-                Updating allotment…
-              </div>
+              <p class="mt-1 text-sm text-slate-500">{{ statusMessage }}</p>
             </div>
             <div class="flex items-center gap-3">
+              <div v-if="progress" class="flex items-center gap-2">
+                <div class="h-2 w-28 overflow-hidden rounded-full bg-app-primary shadow-neu-inset-sm">
+                  <div
+                    class="h-full rounded-full transition-all"
+                    :class="progressBarColor"
+                    :style="{ width: progressPercent + '%' }"
+                  />
+                </div>
+                <span class="text-xs font-semibold text-slate-500">{{ progressPercent }}%</span>
+              </div>
+              <div v-if="isUpdating && activeFlow === 'allotment'" class="flex items-center gap-2">
+                <button
+                  type="button"
+                  @click="togglePause"
+                  class="rounded-lg bg-app-primary px-2.5 py-1.5 text-xs font-semibold text-slate-500 shadow-neu-sm transition-all hover:text-app-accent active:shadow-neu-inset-sm cursor-pointer"
+                >
+                  {{ isPaused ? 'Resume' : 'Pause' }}
+                </button>
+                <button
+                  type="button"
+                  @click="stopUpdate"
+                  class="rounded-lg bg-app-primary px-2.5 py-1.5 text-xs font-semibold text-rose-600 shadow-neu-sm transition-all hover:text-rose-700 active:shadow-neu-inset-sm cursor-pointer"
+                >
+                  Stop
+                </button>
+              </div>
               <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
                 Run headless
                 <button
@@ -250,12 +272,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import axios from '../plugins/axios'
 import PageHeader from '../components/PageHeader.vue'
 
 const isUpdating = ref(false)
 const statusMessage = ref('Ready to update allotment')
+const progress = ref<{ current: number; total: number } | null>(null)
+const progressStatus = ref<'running' | 'success' | 'error'>('running')
+const progressPercent = computed(() =>
+  progress.value ? Math.round((progress.value.current / progress.value.total) * 100) : 0
+)
+const progressBarColor = computed(() => {
+  if (progressStatus.value === 'success') return 'bg-emerald-500'
+  if (progressStatus.value === 'error') return 'bg-rose-500'
+  return 'bg-app-accent'
+})
+const activeFlow = ref<'allotment' | 'bar' | null>(null)
+const isPaused = ref(false)
 const username = ref('')
 const password = ref('')
 const maxDates = ref<number | null>(null)
@@ -288,13 +322,40 @@ const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') =>
 
 const clearLogs = () => {
   logs.value = []
+  progress.value = null
+}
+
+const stopUpdate = async () => {
+  try {
+    await axios.post('/api/update-allotment/stop')
+  } catch (error: any) {
+    addLog(`Error requesting stop: ${error.response?.data?.message || error.message}`, 'error')
+  }
+}
+
+const togglePause = async () => {
+  try {
+    if (isPaused.value) {
+      await axios.post('/api/update-allotment/resume')
+      isPaused.value = false
+    } else {
+      await axios.post('/api/update-allotment/pause')
+      isPaused.value = true
+    }
+  } catch (error: any) {
+    addLog(`Error requesting ${isPaused.value ? 'resume' : 'pause'}: ${error.response?.data?.message || error.message}`, 'error')
+  }
 }
 
 const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
   const roomLabel = roomType === 'deluxe' ? 'Deluxe' : 'Premiere'
   try {
     isUpdating.value = true
+    activeFlow.value = 'allotment'
+    isPaused.value = false
     statusMessage.value = `Updating ${roomLabel} allotment...`
+    progress.value = null
+    progressStatus.value = 'running'
     addLog(`Starting ${roomLabel} allotment update process...`, 'info')
 
     // Create EventSource for real-time updates
@@ -303,10 +364,12 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
       addLog(data.message, data.type)
+      if (data.progress) progress.value = data.progress
 
       if (data.type === 'success' || data.type === 'error') {
         eventSource.close()
         isUpdating.value = false
+        progressStatus.value = data.type
         statusMessage.value = data.type === 'success'
           ? `${roomLabel} allotment updated successfully!`
           : `Error: ${data.message}`
@@ -339,7 +402,11 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
 const triggerUpdateRest = async () => {
   try {
     isUpdating.value = true
+    activeFlow.value = 'allotment'
+    isPaused.value = false
     statusMessage.value = 'Updating the rest of the room types allotment...'
+    progress.value = null
+    progressStatus.value = 'running'
     addLog('Starting allotment update process for the rest of the room types...', 'info')
 
     // Create EventSource for real-time updates
@@ -348,10 +415,12 @@ const triggerUpdateRest = async () => {
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
       addLog(data.message, data.type)
+      if (data.progress) progress.value = data.progress
 
       if (data.type === 'success' || data.type === 'error') {
         eventSource.close()
         isUpdating.value = false
+        progressStatus.value = data.type
         statusMessage.value = data.type === 'success'
           ? 'The rest of the room types allotment updated successfully!'
           : `Error: ${data.message}`
@@ -384,7 +453,11 @@ const triggerBarUpdate = async (rooms: Array<'deluxe' | 'premiere'>) => {
   const roomLabel = rooms.map(r => r === 'deluxe' ? 'Deluxe' : 'Premiere').join(' + ')
   try {
     isUpdating.value = true
+    activeFlow.value = 'bar'
+    isPaused.value = false
     statusMessage.value = `Updating ${roomLabel} BAR pricing${barDryRun.value ? ' (dry run)' : ''}...`
+    progress.value = null
+    progressStatus.value = 'running'
     addLog(`Starting ${roomLabel} BAR price-level update${barDryRun.value ? ' (dry run)' : ''}...`, 'info')
 
     // Create EventSource for real-time updates
@@ -393,10 +466,12 @@ const triggerBarUpdate = async (rooms: Array<'deluxe' | 'premiere'>) => {
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
       addLog(data.message, data.type)
+      if (data.progress) progress.value = data.progress
 
       if (data.type === 'success' || data.type === 'error') {
         eventSource.close()
         isUpdating.value = false
+        progressStatus.value = data.type
         statusMessage.value = data.type === 'success'
           ? `${roomLabel} BAR pricing updated successfully!`
           : `Error: ${data.message}`

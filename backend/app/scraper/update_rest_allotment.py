@@ -11,7 +11,7 @@ import platform
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
-from ..shared import log_queue
+from ..shared import log_queue, allotment_run_control
 from .allocation_store import load_allocation_rows
 
 # Room types not covered by update_pms_cm_allotment.py (Deluxe Room / Premiere Room).
@@ -124,8 +124,12 @@ def setup_driver(headless=None):
     return driver
 
 
-def log(driver, message, type='info'):
-    """Log message to both console and browser, and send to queue for streaming"""
+def log(driver, message, type='info', progress=None):
+    """Log message to both console and browser, and send to queue for streaming
+
+    progress: optional (current, total) tuple describing overall batch progress,
+    forwarded to the frontend so it can render a progress bar.
+    """
     print(message)
     try:
         driver.execute_script(f"console.log({repr(message)})")
@@ -133,10 +137,14 @@ def log(driver, message, type='info'):
         print(f"Could not log to browser console: {e}")
 
     try:
-        log_queue.put({
+        log_data = {
             'type': type,
             'message': message
-        })
+        }
+        if progress is not None:
+            current, total = progress
+            log_data['progress'] = {'current': current, 'total': total}
+        log_queue.put(log_data)
     except Exception as e:
         print(f"Could not send log to queue: {e}")
 
@@ -215,6 +223,21 @@ def add_date_range(driver, start_date, end_date):
 
     time.sleep(1)
     log(driver, "Successfully added date range")
+
+
+def check_stop_and_pause(driver):
+    """Cooperative cancellation point, checked once per batch. Blocks (without
+    closing the browser) while paused, and raises if a stop was requested."""
+    if allotment_run_control.pause_event.is_set():
+        log(driver, "Update paused - waiting to resume...")
+        while allotment_run_control.pause_event.is_set():
+            if allotment_run_control.stop_event.is_set():
+                break
+            time.sleep(1)
+        if not allotment_run_control.stop_event.is_set():
+            log(driver, "Resumed")
+    if allotment_run_control.stop_event.is_set():
+        raise Exception("Update stopped by user")
 
 
 def handle_sweet_alert(driver, timeout=10):
@@ -492,8 +515,10 @@ def update_rest_allotment(driver=None, username=None, password=None, max_dates=N
         log(driver, f"Built {len(batches)} batches covering {len(REST_ROOM_TYPE_CONFIG)} room types")
 
         for batch_index, batch in enumerate(batches):
+            check_stop_and_pause(driver)
             log(driver, f"\nProcessing batch {batch_index + 1} of {len(batches)}: "
-                         f"room types {batch['room_types']}, inventory {batch['number_of_rooms']}")
+                         f"room types {batch['room_types']}, inventory {batch['number_of_rooms']}",
+                progress=(batch_index + 1, len(batches)))
 
             if not wait_and_click(driver, By.ID, "btnAddRoom", description="Add Allotment Room button"):
                 raise Exception("Failed to click Add Allotment Room button")
