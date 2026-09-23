@@ -59,6 +59,7 @@
                 <div>
                   <h3 class="font-semibold text-base text-app-tertiary">{{ tab.name }}</h3>
                   <p class="text-sm text-slate-500">{{ tab.description }}</p>
+                  <p class="mt-1 text-xs text-slate-400">Updated on {{ formatUpdatedAt(tabUpdatedAt[tab.id]) }}</p>
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-semibold text-slate-500">Export</span>
@@ -137,6 +138,7 @@ import {
   DocumentArrowDownIcon,
   CodeBracketIcon,
   CircleStackIcon,
+  CloudArrowDownIcon,
 } from '@heroicons/vue/24/outline'
 
 // Data refs
@@ -144,12 +146,17 @@ const pmsRawData = ref<any[]>([])
 const pmsProcessedData = ref<any[]>([])
 const combinedData = ref<any[]>([])
 const allocationData = ref<any[]>([])
+const cmRawData = ref<any[]>([])
 
 // Headers refs
 const pmsRawHeaders = ref<string[]>([])
 const pmsProcessedHeaders = ref<string[]>([])
 const combinedHeaders = ref<string[]>([])
 const allocationHeaders = ref<string[]>([])
+const cmRawHeaders = ref<string[]>([])
+
+// Last-modified timestamp (ISO string) per tab, as returned by each /api/db/* endpoint
+const tabUpdatedAt = ref<Record<string, string | null>>({})
 
 // Loading and error states
 const loading = ref(true)
@@ -159,6 +166,7 @@ const error = ref('')
 const tabs = [
   { id: 'pms-raw', name: 'PMS Raw', icon: TableCellsIcon, description: 'Raw inventory data from the PMS system.' },
   { id: 'pms-processed', name: 'PMS Processed', icon: AdjustmentsHorizontalIcon, description: 'Processed and cleaned inventory data from the PMS system.' },
+  { id: 'cm-raw', name: 'CM Raw', icon: CloudArrowDownIcon, description: 'Raw Channel Manager export data, as scraped from D-EDGE or manually uploaded.' },
   { id: 'combined', name: 'Combined', icon: ArrowsRightLeftIcon, description: 'Combined inventory from all available sources.' },
   { id: 'allocation', name: 'Allocation', icon: CalculatorIcon, description: 'Calculated daily inventory allocation and BAR rates.' }
 ]
@@ -295,6 +303,7 @@ const getDataForTab = (tabId: string) => {
   switch (tabId) {
     case 'pms-raw': return pmsRawData.value;
     case 'pms-processed': return pmsProcessedData.value;
+    case 'cm-raw': return cmRawData.value;
     case 'combined': return combinedData.value;
     case 'allocation': return allocationData.value;
     default: return [];
@@ -305,10 +314,23 @@ const getHeadersForTab = (tabId: string) => {
   switch (tabId) {
     case 'pms-raw': return pmsRawHeaders.value;
     case 'pms-processed': return pmsProcessedHeaders.value;
+    case 'cm-raw': return cmRawHeaders.value;
     case 'combined': return combinedHeaders.value;
     case 'allocation': return allocationHeaders.value;
     default: return [];
   }
+}
+
+// Formats an ISO timestamp (from each /api/db/* endpoint's updated_at) for display;
+// falls back to a placeholder when the source data hasn't been generated yet.
+const formatUpdatedAt = (iso: string | null | undefined) => {
+  if (!iso) return 'unknown'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return 'unknown'
+  return d.toLocaleString('en-US', {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  })
 }
 
 // Formatting functions
@@ -377,8 +399,16 @@ const fetchData = async () => {
       axios.get('/api/db/pms-inventory-raw'),
       axios.get('/api/db/pms-inventory-processed'),
       axios.get('/api/db/combined-inventory'),
-      axios.get('/api/db/inventory-allocation')
+      axios.get('/api/db/inventory-allocation'),
+      axios.get('/api/db/cm-inventory-raw')
     ]);
+
+    const tabIdsByResponseIndex = ['pms-raw', 'pms-processed', 'combined', 'allocation', 'cm-raw'];
+    responses.forEach((res, i) => {
+      if (res.status === 'fulfilled' && res.value.data.status === 'success') {
+        tabUpdatedAt.value[tabIdsByResponseIndex[i]] = res.value.data.updated_at ?? null;
+      }
+    });
 
     if (responses[0].status === 'fulfilled' && responses[0].value.data.status === 'success') {
       pmsRawData.value = responses[0].value.data.data;
@@ -388,6 +418,11 @@ const fetchData = async () => {
     if (responses[1].status === 'fulfilled' && responses[1].value.data.status === 'success') {
       pmsProcessedData.value = responses[1].value.data.data;
       if (pmsProcessedData.value.length > 0) pmsProcessedHeaders.value = Object.keys(pmsProcessedData.value[0]);
+    }
+
+    if (responses[4].status === 'fulfilled' && responses[4].value.data.status === 'success') {
+      cmRawData.value = responses[4].value.data.data;
+      if (cmRawData.value.length > 0) cmRawHeaders.value = Object.keys(cmRawData.value[0]);
     }
 
     if (responses[2].status === 'fulfilled' && responses[2].value.data.status === 'success') {

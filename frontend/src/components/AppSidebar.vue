@@ -83,6 +83,7 @@ import {
   ChatBubbleLeftRightIcon,
   ArchiveBoxIcon,
   ChartBarSquareIcon,
+  ReceiptPercentIcon,
 } from '@heroicons/vue/24/outline'
 
 defineProps<{ open: boolean }>()
@@ -96,6 +97,7 @@ const navigation = [
   { name: 'Data', href: '/data', icon: CircleStackIcon },
   { name: 'Yielder', href: '/yielder', icon: ChartBarIcon },
   { name: 'Allotment', href: '/allotment', icon: ArchiveBoxIcon },
+  { name: 'BAR Calculator', href: '/bar-calculator', icon: ReceiptPercentIcon },
   { name: 'Chat', href: '/chat', icon: ChatBubbleLeftRightIcon },
 ]
 </script>

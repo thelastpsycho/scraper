@@ -73,6 +73,21 @@
                 </div>
               </div>
             </div>
+
+            <!-- BAR Rate Shift -->
+            <div>
+              <h4 class="text-base font-semibold text-app-tertiary flex items-center">
+                <BanknotesIcon class="h-5 w-5 mr-2 text-app-accent" />
+                BAR Rate Shift
+              </h4>
+              <p class="text-xs text-slate-500 mt-1">Shift the base BAR matrix N levels for Deluxe and Premiere Rooms, applied before scarcity escalation. Positive = more expensive (e.g. 1 turns base BAR5 into BAR4). Negative = cheaper (e.g. -1 turns base BAR5 into BAR6).</p>
+              <div class="mt-3 rounded-xl bg-app-primary p-4 shadow-neu-inset-sm">
+                <div>
+                  <label class="block text-sm font-semibold text-slate-600">Shift Levels</label>
+                  <input v-model.number="customConfig.bar_level_shift" type="number" step="1" class="neu-input mt-1">
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Right Column -->
@@ -233,6 +248,7 @@ interface CustomConfig {
   deluxe_override_occupancy: number;
   deluxe_override_premiere: number;
   deluxe_override_amount: number;
+  bar_level_shift: number;
 }
 
 const defaultConfig: CustomConfig = {
@@ -246,7 +262,8 @@ const defaultConfig: CustomConfig = {
   },
   deluxe_override_occupancy: 70,
   deluxe_override_premiere: 61,
-  deluxe_override_amount: 2
+  deluxe_override_amount: 2,
+  bar_level_shift: 0
 }
 
 const customConfig = ref<CustomConfig>({ ...defaultConfig })
@@ -301,7 +318,8 @@ const calculateYield = async () => {
           isNaN(parsedConfig.low_threshold_pct) || 
           isNaN(parsedConfig.deluxe_override_occupancy) || 
           isNaN(parsedConfig.deluxe_override_premiere) || 
-          isNaN(parsedConfig.deluxe_override_amount)) {
+          isNaN(parsedConfig.deluxe_override_amount) ||
+          isNaN(parsedConfig.bar_level_shift)) {
         throw new Error('All numeric values must be valid numbers')
       }
     } catch (parseError) {

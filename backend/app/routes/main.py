@@ -3,6 +3,7 @@ from ..scraper.scraper import scrape_pms_inventory
 from ..scraper.combine_inventory import combine_inventory_files
 from ..scraper.yielder import load_and_clean_data, apply_yield_matrix
 from ..scraper.process_cm_inventory import process_cm_inventory
+from ..scraper.cm_scraper import scrape_cm_inventory
 from ..scraper.update_pms_cm_allotment import update_allotmet
 from ..scraper.update_rest_allotment import update_rest_allotment
 from ..scraper.update_bar import update_bar
@@ -269,6 +270,60 @@ def trigger_process_cm():
             "message": str(e)
         }), 500
 
+@bp.route('/api/scrape-cm/stream')
+def stream_scrape_cm_logs():
+    """Stream CM scrape logs using Server-Sent Events (shares log_queue with the
+    D-EDGE allotment/BAR flows)."""
+    return Response(
+        stream_with_context(log_stream()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+@bp.route('/api/scrape-cm', methods=['POST'])
+def trigger_scrape_cm():
+    """Log into D-EDGE / Availpro, export the Rooms planning grid, and process it.
+
+    Credentials fall back to the DEDGE_USERNAME / DEDGE_PASSWORD env vars when
+    omitted from the request body. days defaults to 100 inside scrape_cm_inventory
+    to match the PMS scraper's range. Progress streams over /api/scrape-cm/stream
+    (scrape_cm_inventory's own step logs already push onto the shared log_queue).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        username = data.get('dedgeUsername')
+        password = data.get('dedgePassword')
+        start_date = data.get('startDate')
+        headless = data.get('headless')
+
+        def run():
+            try:
+                log_queue.put({'type': 'info', 'message': 'Starting CM export from D-EDGE / Availpro...'})
+                result = scrape_cm_inventory(start_date=start_date, username=username, password=password, headless=headless)
+                log_queue.put({'type': 'success', 'message': result or 'CM inventory processing completed successfully'})
+            except Exception as e:
+                log_queue.put({'type': 'error', 'message': str(e)})
+            finally:
+                log_queue.put(None)
+
+        thread = threading.Thread(target=run)
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "status": "success",
+            "message": "CM scrape started"
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
 @bp.route('/api/custom-yield', methods=['POST'])
 def trigger_custom_yield():
     try:
@@ -306,6 +361,17 @@ def trigger_custom_yield():
                     "message": f"Invalid type for {key}. Expected {expected_type}, got {type(config[key])}"
                 }), 400
 
+        # Optional: shift the BAR base matrix N whole ranks (positive = more
+        # expensive, negative = cheaper) before scarcity escalation. Defaults
+        # to 0 (no shift) for backward compatibility with older clients.
+        bar_level_shift = config.get('bar_level_shift', 0)
+        if not isinstance(bar_level_shift, (int, float)) or isinstance(bar_level_shift, bool):
+            return jsonify({
+                "status": "error",
+                "message": f"Invalid type for bar_level_shift. Expected number, got {type(bar_level_shift)}"
+            }), 400
+        bar_level_shift = int(bar_level_shift)
+
         # Check if combined inventory exists
         combined_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'combined_inventory.db')
         if not os.path.exists(combined_db_path):
@@ -340,7 +406,8 @@ def trigger_custom_yield():
             include_simple_rooms=False,
             deluxe_override_occupancy=config['deluxe_override_occupancy'],
             deluxe_override_premiere=config['deluxe_override_premiere'],
-            deluxe_override_amount=config['deluxe_override_amount']
+            deluxe_override_amount=config['deluxe_override_amount'],
+            bar_level_shift=bar_level_shift
         )
 
         # Rename and select the Deluxe/Premiere output columns to match the
@@ -427,34 +494,6 @@ def upload_cm_excel():
         file.save(save_path)
         return jsonify({'status': 'success', 'message': 'File uploaded successfully'})
     return jsonify({'status': 'error', 'message': 'Invalid file type'}), 400
-
-@bp.route('/api/db/inventory-allocation')
-def get_inventory_allocation():
-    try:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'inventory_allocation.db')
-        if not os.path.exists(db_path):
-            return jsonify({
-                "status": "error",
-                "message": "Inventory allocation database not found"
-            }), 404
-
-        conn = sqlite3.connect(db_path)
-        data = pd.read_sql_query("SELECT * FROM daily_inventory_allocation", conn)
-        conn.close()
-
-        # Convert the data to a format that can be serialized to JSON
-        result = data.to_dict(orient='records')
-        
-        return jsonify({
-            "status": "success",
-            "data": result
-        })
-    except Exception as e:
-        print(f"Error fetching inventory allocation: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to fetch inventory allocation: {str(e)}"
-        }), 500
 
 def log_stream():
     """Generator function to stream logs"""

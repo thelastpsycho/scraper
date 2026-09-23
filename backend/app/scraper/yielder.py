@@ -168,16 +168,14 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
     def assign_season(date):
         year = date.year
         date_no_year = date.replace(year=2025)
-        if (datetime(2025, 1, 1) <= date_no_year <= datetime(2025, 1, 5) or
-            datetime(2025, 12, 27) <= date_no_year <= datetime(2025, 12, 31) or
-            date >= datetime(2026, 1, 1) and date <= datetime(2026, 1, 3)):
+        if (datetime(2025, 1, 1) <= date_no_year <= datetime(2025, 1, 3) or
+            datetime(2025, 12, 27) <= date_no_year <= datetime(2025, 12, 31)):
             return 'Peak'
-        elif (datetime(2025, 1, 6) <= date_no_year <= datetime(2025, 5, 31) or
+        elif (datetime(2025, 1, 4) <= date_no_year <= datetime(2025, 5, 31) or
+              datetime(2025, 6, 1) <= date_no_year <= datetime(2025, 6, 30) or
+              datetime(2025, 9, 1) <= date_no_year <= datetime(2025, 9, 30) or
               datetime(2025, 10, 1) <= date_no_year <= datetime(2025, 12, 22)):
             return 'Normal'
-        elif (datetime(2025, 6, 1) <= date_no_year <= datetime(2025, 6, 30) or
-              datetime(2025, 9, 1) <= date_no_year <= datetime(2025, 9, 30)):
-            return 'Shoulder'
         elif (datetime(2025, 7, 1) <= date_no_year <= datetime(2025, 8, 31) or
               datetime(2025, 12, 23) <= date_no_year <= datetime(2025, 12, 26)):
             return 'High'
@@ -209,11 +207,14 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
 def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None, room_caps=None,
                        include_simple_rooms=True,
                        deluxe_override_occupancy=None, deluxe_override_premiere=None,
-                       deluxe_override_amount=None):
+                       deluxe_override_amount=None, bar_level_shift=0):
     # Use default values if not provided
     very_low_threshold_pct = very_low_threshold_pct or VERY_LOW_THRESHOLD_PCT
     low_threshold_pct = low_threshold_pct or LOW_THRESHOLD_PCT
     room_caps = room_caps or ROOM_CAPS
+    # Whole ranks to shift the base BAR matrix toward the more expensive tier
+    # (negative shifts toward cheaper), applied before scarcity escalation.
+    bar_level_shift = int(bar_level_shift) if bar_level_shift else 0
 
     # Deluxe override configuration (fall back to module defaults when not supplied)
     if deluxe_override_occupancy is None:
@@ -237,11 +238,6 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
                 'Medium': {'bar': 'BAR5'},
                 'Low': {'bar': 'BAR7'}
             },
-            'Shoulder': {
-                'High': {'bar': 'BAR3'},
-                'Medium': {'bar': 'BAR4'},
-                'Low': {'bar': 'BAR6'}
-            },
             'High': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
@@ -259,11 +255,6 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
                 'Medium': {'bar': 'BAR5'},
                 'Low': {'bar': 'BAR7'}
             },
-            'Shoulder': {
-                'High': {'bar': 'BAR3'},
-                'Medium': {'bar': 'BAR4'},
-                'Low': {'bar': 'BAR6'}
-            },
             'High': {
                 'High': {'bar': 'BAR2'},
                 'Medium': {'bar': 'BAR3'},
@@ -280,7 +271,20 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
     valid_bar_rates = {'BAR2', 'BAR3', 'BAR4', 'BAR5', 'BAR6', 'BAR7'}
     bar_rate_order = {'BAR7': 6, 'BAR6': 5, 'BAR5': 4, 'BAR4': 3, 'BAR3': 2, 'BAR2': 1}  # Lower number = more expensive
     bar_rate_reverse = {1: 'BAR2', 2: 'BAR3', 3: 'BAR4', 4: 'BAR5', 5: 'BAR6', 6: 'BAR7'}
-    
+
+    def shift_bar_base(base_bar, season):
+        """Shift the matrix base BAR by whole ranks toward the more expensive
+        tier (lower rank number), before scarcity escalation runs. Clamped at
+        the same seasonal BAR2 floor as adjust_bar_rate, and at BAR7 (rank 6)
+        on the cheap end."""
+        if not bar_level_shift:
+            return base_bar
+        rank = bar_rate_order.get(base_bar, 4)
+        min_rank = 1 if season in ('Peak', 'High') else 2
+        max_rank = 6
+        new_rank = max(min_rank, min(max_rank, rank - bar_level_shift))
+        return bar_rate_reverse.get(new_rank, base_bar)
+
     data['Deluxe Online Inventory'] = 0
     data['Deluxe BAR Rate'] = ''
     data['Premiere Online Inventory'] = 0
@@ -312,7 +316,7 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
             low_threshold = capacity * low_threshold_pct
             
             base_rank = bar_rate_order.get(base_bar, 4)  # Default to BAR5 if invalid
-            # BAR2 (rank 1) is reserved for Peak/High seasons; Normal/Shoulder
+            # BAR2 (rank 1) is reserved for Peak/High seasons; Normal season
             # scarcity escalation is capped at BAR3 (rank 2).
             min_rank = 1 if season in ('Peak', 'High') else 2
             if remaining_inventory <= very_low_threshold:
@@ -339,6 +343,7 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         if base_bar not in valid_bar_rates:
             print(f"Warning: Invalid Premiere BAR Rate '{base_bar}' for {row['Date'].strftime('%Y-%m-%d')}. Using BAR5.")
             base_bar = 'BAR5'
+        base_bar = shift_bar_base(base_bar, season)
         bar_rate = adjust_bar_rate(base_bar, remaining, room, demand, season)
         
         data.at[idx, 'Premiere Online Inventory'] = online_inventory
@@ -361,6 +366,7 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         if base_bar not in valid_bar_rates:
             print(f"Warning: Invalid Deluxe BAR Rate '{base_bar}' for {row['Date'].strftime('%Y-%m-%d')}. Using BAR5.")
             base_bar = 'BAR5'
+        base_bar = shift_bar_base(base_bar, season)
         bar_rate = adjust_bar_rate(base_bar, remaining, room, demand, season)
         
         data.at[idx, 'Deluxe Online Inventory'] = online_inventory

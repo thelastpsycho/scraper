@@ -4,6 +4,7 @@ import Scraping from './views/Scraping.vue'
 import Yielder from './views/Yielder.vue'
 import Data from './views/Data.vue'
 import Allotment from './views/Allotment.vue'
+import BarCalculator from './views/BarCalculator.vue'
 import Chat from './views/Chat.vue'
 
 const router = createRouter({
@@ -33,6 +34,11 @@ const router = createRouter({
       path: '/allotment',
       name: 'allotment',
       component: Allotment
+    },
+    {
+      path: '/bar-calculator',
+      name: 'bar-calculator',
+      component: BarCalculator
     },
     {
       path: '/chat',

@@ -14,6 +14,14 @@ def process_cm_inventory():
         raise FileNotFoundError(f"The CM Excel file was not found at: {upload_path}")
     
     df = pd.read_excel(upload_path)
+
+    # Keep an unfiltered copy of exactly what was scraped/uploaded (before the
+    # 'Left for sale' filter + transpose below) so it can be inspected as-is.
+    raw_db_path = os.path.join(data_dir, 'cm_inventory_raw.db')
+    raw_conn = sqlite3.connect(raw_db_path)
+    df.to_sql('cm_inventory_raw', raw_conn, if_exists='replace', index=False)
+    raw_conn.close()
+
     df = df.drop('Unnamed: 1', axis=1)
     df = df.rename(columns={'Unnamed: 2': 'Type'})
     df = df[df['Type'] == 'Left for sale']

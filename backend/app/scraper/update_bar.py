@@ -130,11 +130,30 @@ def _find_first(driver, selectors):
     return None
 
 
+def _wait_for_device_authorization(driver, timeout=300):
+    """Pause here while a human enters the emailed device-verification code.
+
+    Only useful when the browser is actually visible (headless=False) - there is
+    no one to read the email or click otherwise. Once this passes, the trust
+    cookie is written into the persistent Chrome profile and every later run
+    (headless or not) skips this step entirely.
+    """
+    log(driver,
+        "New device detected - D-EDGE emailed a verification code to authorize this "
+        f"browser. Enter it in the open Chrome window within {timeout // 60} minutes...")
+    WebDriverWait(driver, timeout).until(
+        lambda d: "/Device" not in d.current_url and "extranet.availpro.com" in d.current_url
+    )
+    log(driver, "Device verified - trust is now stored in this Chrome profile for future runs")
+
+
 def ensure_logged_in(driver, username, password, timeout=30):
     """Make sure we land on the extranet, logging in through D-EDGE if required.
 
-    Returns True when the extranet is reachable. Raises if a one-time device
-    authorisation code is required (that arrives by email and cannot be automated).
+    Returns True when the extranet is reachable. If a one-time device
+    authorisation code is required (emailed, cannot be automated), this blocks
+    until a human enters it in the visible browser window (see
+    _wait_for_device_authorization) - only works with headless=False.
     """
     driver.get(APPLY_URL)
     wait_for_page_load(driver)
@@ -146,11 +165,13 @@ def ensure_logged_in(driver, username, password, timeout=30):
         return True
 
     if "/Device" in url:
-        raise RuntimeError(
-            "D-EDGE wants a new-device authorization code (sent by email). "
-            "Log in once by hand in this Chrome profile to trust the device, "
-            "then re-run - the trust cookie is stored in the persistent profile."
-        )
+        _wait_for_device_authorization(driver)
+        driver.get(APPLY_URL)
+        wait_for_page_load(driver)
+        if "extranet.availpro.com" not in driver.current_url:
+            raise RuntimeError(f"Login did not reach the extranet (at {driver.current_url})")
+        log(driver, "Logged in to D-EDGE successfully")
+        return True
 
     # We are on the login domain. Step 1: username.
     log(driver, "Logging in to D-EDGE...")
@@ -179,10 +200,7 @@ def ensure_logged_in(driver, username, password, timeout=30):
     time.sleep(2)
 
     if "/Device" in driver.current_url:
-        raise RuntimeError(
-            "D-EDGE requires a new-device authorization code (emailed). "
-            "Enter it by hand once in this Chrome profile, then re-run."
-        )
+        _wait_for_device_authorization(driver)
 
     # Re-navigate to the apply screen now that we are authenticated.
     driver.get(APPLY_URL)

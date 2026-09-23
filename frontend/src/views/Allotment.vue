@@ -290,8 +290,8 @@ const progressBarColor = computed(() => {
 })
 const activeFlow = ref<'allotment' | 'bar' | null>(null)
 const isPaused = ref(false)
-const username = ref('')
-const password = ref('')
+const username = ref(import.meta.env.VITE_PMS_USERNAME || '')
+const password = ref(import.meta.env.VITE_PMS_PASSWORD || '')
 const maxDates = ref<number | null>(null)
 const headless = ref(false)
 // TODO: prefilled for convenience — move server-side before shipping (ships to

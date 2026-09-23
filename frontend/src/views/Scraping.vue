@@ -67,12 +67,19 @@
         <div class="neu-card p-6">
           <h2 class="text-base font-semibold text-app-tertiary">Additional tools</h2>
           <p class="mt-1 text-sm text-slate-500">Run the downstream processing stages after scraping.</p>
-          <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <button @click="openModal" :disabled="loadingProcessCM" class="group flex flex-col items-start gap-3 rounded-xl bg-app-primary p-4 text-left shadow-neu-sm transition-all duration-200 active:shadow-neu-inset-sm disabled:opacity-50 cursor-pointer">
               <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-app-primary text-app-accent shadow-neu-sm">
                 <DocumentTextIcon class="h-5 w-5" />
               </span>
               <span class="text-sm font-semibold text-app-tertiary">Process CM</span>
+            </button>
+            <button @click="triggerScrapeCM" :disabled="isScrapingCM" class="group flex flex-col items-start gap-3 rounded-xl bg-app-primary p-4 text-left shadow-neu-sm transition-all duration-200 active:shadow-neu-inset-sm disabled:opacity-50 cursor-pointer">
+              <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-app-primary text-app-accent shadow-neu-sm">
+                <span v-if="isScrapingCM" class="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-app-accent"></span>
+                <CloudArrowDownIcon v-else class="h-5 w-5" />
+              </span>
+              <span class="text-sm font-semibold text-app-tertiary">{{ isScrapingCM ? 'Scraping CM…' : 'Scrape CM' }}</span>
             </button>
             <button @click="triggerCombine" :disabled="loadingCombine" class="group flex flex-col items-start gap-3 rounded-xl bg-app-primary p-4 text-left shadow-neu-sm transition-all duration-200 active:shadow-neu-inset-sm disabled:opacity-50 cursor-pointer">
               <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-app-primary text-app-accent shadow-neu-sm">
@@ -208,6 +215,40 @@
         </div>
       </div>
     </div>
+
+    <!-- CM Scrape Process Modal -->
+    <div v-if="isScrapingCM" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-500/20 p-4 backdrop-blur-sm">
+      <div class="relative w-full max-w-xl rounded-xl bg-app-primary p-6 shadow-neu">
+        <div class="mb-4 flex items-center justify-between">
+          <h3 class="flex items-center gap-3 font-semibold text-base text-app-tertiary">
+            <span class="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-app-accent"></span>
+            Scraping CM from D-EDGE / Availpro
+          </h3>
+          <button @click="closeScrapeCMModal" class="btn-icon !p-2">
+            <XMarkIcon class="h-5 w-5" />
+          </button>
+        </div>
+
+        <p class="mb-3 text-xs text-slate-500">
+          First run on a new device needs a code emailed by D-EDGE - if a Chrome window pops up asking for one, check the inbox and enter it there.
+        </p>
+
+        <div ref="cmLogContainer" class="h-72 overflow-y-auto rounded-xl bg-app-primary p-3 shadow-neu-inset">
+          <div v-if="cmLogs.length === 0" class="py-8 text-center text-sm text-slate-500">
+            Waiting for the scrape to start…
+          </div>
+          <div v-for="(entry, index) in cmLogs" :key="index" class="border-b border-slate-200 py-1 font-mono text-xs last:border-b-0">
+            <span :class="{
+              'text-emerald-700': entry.type === 'success',
+              'text-rose-700': entry.type === 'error',
+              'text-slate-500': entry.type === 'info'
+            }">
+              {{ entry.message }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
@@ -224,6 +265,7 @@ import {
   CheckCircleIcon,
   XMarkIcon,
   CloudArrowUpIcon,
+  CloudArrowDownIcon,
 } from '@heroicons/vue/24/outline'
 
 const isScraping = ref(false)
@@ -247,11 +289,27 @@ let eventSource: EventSource | null = null
 const loadingCombine = ref(false)
 const loadingYield = ref(false)
 const loadingProcessCM = ref(false)
+const dedgeUsername = ref(import.meta.env.VITE_DEDGE_USERNAME || '')
+const dedgePassword = ref(import.meta.env.VITE_DEDGE_PASSWORD || '')
+const isScrapingCM = ref(false)
+const cmLogs = ref<Array<{ message: string; type: 'info' | 'success' | 'error' }>>([])
+const cmLogContainer = ref<HTMLElement | null>(null)
+let cmEventSource: EventSource | null = null
+
+watch(
+  () => cmLogs.value.length,
+  () => {
+    nextTick(() => {
+      const el = cmLogContainer.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
+)
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 const startDate = ref(new Date().toISOString().split('T')[0]) // Initialize with today's date
-const username = ref('')
-const password = ref('')
+const username = ref(import.meta.env.VITE_PMS_USERNAME || '')
+const password = ref(import.meta.env.VITE_PMS_PASSWORD || '')
 
 const selectedFile = ref<File|null>(null)
 const uploading = ref(false)
@@ -445,6 +503,51 @@ async function uploadAndProcessCM() {
     uploading.value = false
     processingCM.value = false
   }
+}
+
+async function triggerScrapeCM() {
+  isScrapingCM.value = true
+  cmLogs.value = []
+  message.value = ''
+
+  // Open the stream before starting the job so no early log lines are missed.
+  cmEventSource = new EventSource('/api/scrape-cm/stream')
+
+  cmEventSource.onmessage = (event) => {
+    const data = JSON.parse(event.data)
+    cmLogs.value.push({ message: data.message, type: data.type })
+
+    if (data.type === 'success' || data.type === 'error') {
+      cmEventSource?.close()
+      isScrapingCM.value = false
+      message.value = data.message
+      messageType.value = data.type === 'success' ? 'success' : 'error'
+    }
+  }
+
+  cmEventSource.onerror = () => {
+    cmLogs.value.push({ message: 'Connection to server lost.', type: 'error' })
+    cmEventSource?.close()
+    isScrapingCM.value = false
+  }
+
+  try {
+    await axios.post('/api/scrape-cm', {
+      startDate: startDate.value,
+      dedgeUsername: dedgeUsername.value || undefined,
+      dedgePassword: dedgePassword.value || undefined,
+    })
+  } catch (err: any) {
+    cmEventSource?.close()
+    isScrapingCM.value = false
+    message.value = err?.response?.data?.message || 'Failed to start CM scrape.'
+    messageType.value = 'error'
+  }
+}
+
+function closeScrapeCMModal() {
+  cmEventSource?.close()
+  isScrapingCM.value = false
 }
 
 async function triggerCombine() {
