@@ -22,11 +22,10 @@ def create_app():
     from .routes import main
     from .routes import database_routes
     from .routes import pipeline_routes
-    from .routes import auth_routes, assistant_routes
+    from .routes import auth_routes
     app.register_blueprint(main.bp)
     app.register_blueprint(database_routes.bp)
     app.register_blueprint(pipeline_routes.bp)
     app.register_blueprint(auth_routes.bp)
-    app.register_blueprint(assistant_routes.bp)
     
     return app 

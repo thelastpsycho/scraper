@@ -32,7 +32,7 @@ updates to `main`. Tests do not modify external PMS/D-EDGE accounts.
 - `backend/app/inventory/` — processing and SQLite persistence.
 - `backend/app/revenue/` — yield logic.
 - `backend/app/pipeline/` — orchestration.
-- `backend/app/routes/` — stable API routes, auth, assistant proxy.
+- `backend/app/routes/` — stable API routes and auth.
 - `frontend/src/views/` — Vue router pages.
 
 Review `ALLOCATION_LOGIC.md`, `changes.md`, and `SECURITY.md` before

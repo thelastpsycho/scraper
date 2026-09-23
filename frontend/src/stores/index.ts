@@ -18,32 +18,3 @@ export const useMainStore = defineStore('main', {
     }
   }
 })
-
-export const useChatStore = defineStore('chat', {
-  state: () => ({
-    messages: [] as { role: string; content: string }[],
-  }),
-  actions: {
-    loadFromSession() {
-      const saved = sessionStorage.getItem('chatMessages');
-      if (saved) {
-        this.messages = JSON.parse(saved);
-      }
-    },
-    saveToSession() {
-      sessionStorage.setItem('chatMessages', JSON.stringify(this.messages));
-    },
-    addMessage(msg: { role: string; content: string }) {
-      this.messages.push(msg);
-      this.saveToSession();
-    },
-    setMessages(msgs: { role: string; content: string }[]) {
-      this.messages = msgs;
-      this.saveToSession();
-    },
-    clearMessages() {
-      this.messages = [];
-      this.saveToSession();
-    }
-  }
-}); 

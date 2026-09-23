@@ -26,4 +26,4 @@ def test_api_routes_preserved():
     assert {"/api/scrape", "/api/scrape-cm", "/api/combine-inventory",
             "/api/custom-yield", "/api/update-allotment", "/api/update-bar",
             "/api/pipeline/start", "/api/pipeline/status", "/api/pipeline/stream",
-            "/api/assistant/chat", "/api/auth/login"}.issubset(paths)
+            "/api/auth/login"}.issubset(paths)

@@ -86,7 +86,11 @@ retained.
   also require a CSRF token.
 - Credentials and the Flask session secret are configured on the backend.
   Flask defaults to loopback with its debugger disabled.
-- DeepSeek API calls now use a Flask proxy, and assistant Markdown is sanitized.
+- The DeepSeek-backed chat/assistant page and its planned Flask proxy were
+  dropped entirely instead: the operator revoked the DeepSeek key and the
+  feature wasn't needed, so `InventoryAssistantView.vue`, `routes/assistant_routes.py`,
+  and the chat store were removed rather than hardened (see the merge commit
+  on this branch and `main`'s `eb2f80e`).
 - Removed the current source copies of exposed DeepSeek/D-EDGE secrets, plus
   browser-bundled `VITE_*` provider credential defaults.
 - **Operator action required:** rotate both previously exposed credentials.
@@ -106,7 +110,7 @@ retained.
 ### Tests and operations
 
 - Added backend tests for BAR chunking, year-boundary grouping, checkpoint
-  recovery, authentication/CSRF, the assistant proxy, and moved-module imports.
+  recovery, authentication/CSRF, and moved-module imports.
 - Added GitHub Actions backend test and frontend build checks.
 - Declared the missing `tabulate` dependency.
 - Restored detailed per-room allocation documentation.

@@ -18,8 +18,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 Set `APP_ACCESS_TOKEN` for operator login and a *different*
-`APP_SESSION_SECRET` for Flask session signing. Set the newly rotated
-`DEEPSEEK_API_KEY` on the backend if using the assistant. Optional
+`APP_SESSION_SECRET` for Flask session signing. Optional
 `PMS_USERNAME`, `PMS_PASSWORD`, `DEDGE_USERNAME`, and `DEDGE_PASSWORD`
 can also reside on the backend. Never use frontend `VITE_*` variables for
 provider credentials: Vite embeds them into browser JavaScript.

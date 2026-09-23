@@ -1,4 +1,4 @@
-"""Verify the API fails closed, protects writes, and proxies assistant requests."""
+"""Verify the API fails closed and protects writes."""
 import pytest
 
 from app import create_app
@@ -54,41 +54,3 @@ def test_unsafe_dev_requires_explicit_local_flag(monkeypatch):
     monkeypatch.setenv("APP_HOST", "127.0.0.1")
     local = create_app().test_client()
     assert local.get("/api/pipeline/status").status_code == 200
-
-
-def test_assistant_key_stays_server_side(app, monkeypatch):
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-only-backend-secret")
-    client = app.test_client()
-    csrf = sign_in(client)
-    seen = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        def json(self):
-            return {"choices": [{"message": {"content": "Inventory available."}}]}
-
-    def fake_post(url, *, json, headers, timeout):
-        seen.update(url=url, headers=headers, timeout=timeout, payload=json)
-        return FakeResponse()
-
-    monkeypatch.setattr("app.routes.assistant_routes.requests.post", fake_post)
-    response = client.post("/api/assistant/chat",
-                           json={"messages": [{"role": "user", "content": "Availability?"}]},
-                           headers={"X-CSRF-Token": csrf})
-    assert response.status_code == 200
-    assert response.get_json()["choices"][0]["message"]["content"] == "Inventory available."
-    assert seen["headers"]["Authorization"] == "Bearer test-only-backend-secret"
-    assert seen["url"] == "https://api.deepseek.com/v1/chat/completions"
-
-
-def test_assistant_rejects_invalid_payload_and_missing_key(app, monkeypatch):
-    client = app.test_client()
-    csrf = sign_in(client)
-    assert client.post("/api/assistant/chat", json={"messages": [{"role": "admin", "content": "x"}]},
-                       headers={"X-CSRF-Token": csrf}).status_code in (400, 503)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    result = client.post("/api/assistant/chat",
-                         json={"messages": [{"role": "user", "content": "x"}]},
-                         headers={"X-CSRF-Token": csrf})
-    assert result.status_code == 503
