@@ -187,7 +187,7 @@ def scrape_pms_inventory(start_date=None, username=None, password=None, headless
             for inp in all_inputs:
                 print(f"  - name='{inp.get_attribute('name')}', type='{inp.get_attribute('type')}', "
                       f"id='{inp.get_attribute('id')}', required={inp.get_attribute('required')}, "
-                      f"value='{inp.get_attribute('value')[:20] if inp.get_attribute('value') else ''}'")
+                      f"value='[REDACTED]'")
 
             # Look for required fields
             required_fields = driver.find_elements(By.CSS_SELECTOR, "#formLogin input[required]")

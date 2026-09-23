@@ -289,8 +289,8 @@ let eventSource: EventSource | null = null
 const loadingCombine = ref(false)
 const loadingYield = ref(false)
 const loadingProcessCM = ref(false)
-const dedgeUsername = ref(import.meta.env.VITE_DEDGE_USERNAME || '')
-const dedgePassword = ref(import.meta.env.VITE_DEDGE_PASSWORD || '')
+const dedgeUsername = ref('')
+const dedgePassword = ref('')
 const isScrapingCM = ref(false)
 const cmLogs = ref<Array<{ message: string; type: 'info' | 'success' | 'error' }>>([])
 const cmLogContainer = ref<HTMLElement | null>(null)
@@ -308,8 +308,8 @@ watch(
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 const startDate = ref(new Date().toISOString().split('T')[0]) // Initialize with today's date
-const username = ref(import.meta.env.VITE_PMS_USERNAME || '')
-const password = ref(import.meta.env.VITE_PMS_PASSWORD || '')
+const username = ref('')
+const password = ref('')
 
 const selectedFile = ref<File|null>(null)
 const uploading = ref(false)

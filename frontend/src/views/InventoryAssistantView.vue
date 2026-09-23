@@ -159,6 +159,46 @@ function parseTableFromAIResponse(text: string) {
   return { headers, rows };
 }
 
+// Rebuild Markdown into a strict allowlist of fresh DOM nodes: never pass
+// upstream/user-provided raw HTML or event-handler attributes to v-html.
+function sanitizeMarkdown(html: string): string {
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const allowed = new Set(['p', 'div', 'span', 'br', 'strong', 'b', 'em', 'i', 'code', 'pre',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'table',
+    'thead', 'tbody', 'tr', 'th', 'td', 'a', 'hr']);
+  const blocked = new Set(['script', 'style', 'iframe', 'object', 'embed', 'form', 'img', 'svg', 'math']);
+  const cleaned = document.createElement('div');
+  function appendSafe(node: Node, target: Node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.appendChild(document.createTextNode(node.textContent || ''));
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const source = node as Element;
+    const tag = source.tagName.toLowerCase();
+    if (blocked.has(tag)) return;
+    const element = document.createElement(allowed.has(tag) ? tag : 'span');
+    if (tag === 'table') element.className = 'ai-chat-table';
+    if (tag === 'td' && source.classList.contains('negative-value')) element.className = 'negative-value';
+    if (tag === 'a') {
+      const href = source.getAttribute('href');
+      if (href) {
+        try {
+          const url = new URL(href, window.location.href);
+          if (['https:', 'http:', 'mailto:'].includes(url.protocol)) {
+            element.setAttribute('href', url.href);
+            element.setAttribute('rel', 'noopener noreferrer');
+          }
+        } catch { /* Ignore malformed link destinations. */ }
+      }
+    }
+    target.appendChild(element);
+    source.childNodes.forEach(child => appendSafe(child, element));
+  }
+  parsed.body.childNodes.forEach(child => appendSafe(child, cleaned));
+  return cleaned.innerHTML;
+}
+
 function renderMarkdown(text: string) {
   text = text.replace(/\s*\(Overbooked\)/g, ''); // Remove all (Overbooked)
   const tableData = parseTableFromAIResponse(text);
@@ -187,14 +227,14 @@ function renderMarkdown(text: string) {
       html += '</tr>';
     });
     html += '</tbody></table>';
-    return `
-      ${before ? `<div style="margin-bottom:0.5em">${marked.parseInline(before)}</div>` : ''}
-      <div style="margin: 0.5em 0;">${html}</div>
-      ${after ? `<div style="margin-top:0.5em">${marked.parseInline(after)}</div>` : ''}
-    `;
+    return sanitizeMarkdown(`
+      ${before ? `<div>${marked.parseInline(before)}</div>` : ''}
+      <div>${html}</div>
+      ${after ? `<div>${marked.parseInline(after)}</div>` : ''}
+    `);
   }
   const html = marked.parse(text, { breaks: true }) as string;
-  return html;
+  return sanitizeMarkdown(html);
 }
 
 async function fetchInventory() {
@@ -270,19 +310,9 @@ async function sendMessage() {
     ...chatStore.messages.filter(m => m.role !== 'system')
   ];
   try {
-    const response = await axios.post(
-      'https://api.deepseek.com/v1/chat/completions',
-      {
-        model: 'deepseek-chat',
-        messages: contextMessages.map(m => ({ role: m.role, content: m.content }))
-      },
-      {
-        headers: {
-          'Authorization': 'Bearer sk-8c0b9404dabb4da3a5fd92365f5c1f37',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    const response = await axios.post('/api/assistant/chat', {
+      messages: contextMessages.map(m => ({ role: m.role, content: m.content }))
+    });
     const aiMessage = response.data.choices?.[0]?.message?.content || 'No response from AI.';
     chatStore.addMessage({ role: 'assistant', content: aiMessage });
   } catch (err) {

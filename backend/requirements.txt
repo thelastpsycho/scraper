@@ -9,3 +9,4 @@ webdriver_manager
 lxml
 python-dotenv
 Flask-Cors
+tabulate

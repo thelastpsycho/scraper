@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import DashboardLayout from './components/DashboardLayout.vue'
+import AuthGate from './components/AuthGate.vue'
 </script>
 
 <template>
-  <DashboardLayout>
-    <router-view />
-  </DashboardLayout>
+  <AuthGate>
+    <DashboardLayout>
+      <router-view />
+    </DashboardLayout>
+  </AuthGate>
 </template>
 
 <style>
