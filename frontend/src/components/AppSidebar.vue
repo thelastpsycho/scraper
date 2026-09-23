@@ -80,7 +80,6 @@ import {
   DocumentTextIcon,
   CircleStackIcon,
   ChartBarIcon,
-  ChatBubbleLeftRightIcon,
   ArchiveBoxIcon,
   ChartBarSquareIcon,
   ReceiptPercentIcon,
@@ -100,6 +99,5 @@ const navigation = [
   { name: 'Allotment', href: '/allotment', icon: ArchiveBoxIcon },
   { name: 'BAR Calculator', href: '/bar-calculator', icon: ReceiptPercentIcon },
   { name: 'Pipeline', href: '/pipeline', icon: RocketLaunchIcon },
-  { name: 'Chat', href: '/chat', icon: ChatBubbleLeftRightIcon },
 ]
 </script>

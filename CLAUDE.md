@@ -92,7 +92,6 @@ Vue Router lives in `src/router.ts`. Routed components use the `*View.vue` namin
 - `AllotmentManagementView.vue`
 - `BarPricingView.vue`
 - `AutomationPipelineView.vue`
-- `InventoryAssistantView.vue`
 
 The existing public route URLs remain unchanged.
 
@@ -100,4 +99,4 @@ The shared axios instance uses a relative base URL and Vite proxies `/api` to th
 
 ## Known security concern
 
-`InventoryAssistantView.vue` currently calls DeepSeek directly from the browser and the repository history contains a DeepSeek API key. Rotate that key and move the API call server-side in a separate security-focused change.
+The DeepSeek-backed chat/assistant page (`InventoryAssistantView.vue`) was removed because it called DeepSeek directly from the browser with a hardcoded API key. That key is still in repository history and must be rotated/revoked - removing the source file does not do that.

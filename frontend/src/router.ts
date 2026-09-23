@@ -6,7 +6,6 @@ import InventoryDataView from './views/InventoryDataView.vue'
 import AllotmentManagementView from './views/AllotmentManagementView.vue'
 import BarPricingView from './views/BarPricingView.vue'
 import AutomationPipelineView from './views/AutomationPipelineView.vue'
-import InventoryAssistantView from './views/InventoryAssistantView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -45,11 +44,6 @@ const router = createRouter({
       path: '/pipeline',
       name: 'pipeline',
       component: AutomationPipelineView
-    },
-    {
-      path: '/chat',
-      name: 'chat',
-      component: InventoryAssistantView
     }
   ]
 })
