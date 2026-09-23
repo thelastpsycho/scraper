@@ -1,13 +1,14 @@
 from flask import Blueprint, jsonify, Response, request, stream_with_context
 from ..scraper.scraper import scrape_pms_inventory
 from ..scraper.combine_inventory import combine_inventory_files
-from ..scraper.yielder import load_and_clean_data, apply_yield_matrix
+from ..scraper.yielder import load_and_clean_data, apply_yield_matrix, apply_custom_yield
 from ..scraper.process_cm_inventory import process_cm_inventory
 from ..scraper.cm_scraper import scrape_cm_inventory
 from ..scraper.update_pms_cm_allotment import update_allotmet
 from ..scraper.update_rest_allotment import update_rest_allotment
 from ..scraper.update_bar import update_bar
 from ..shared import log_queue, allotment_run_control
+from .. import pipeline_runner
 import queue
 import threading
 import time
@@ -75,6 +76,8 @@ def health_check():
 @bp.route('/api/scrape', methods=['POST'])
 def trigger_scrape():
     global scraping_active, scraping_error
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     if scraping_active:
         return jsonify({"status": "error", "message": "Scraping already in progress"}), 409
     
@@ -138,6 +141,8 @@ def scrape_stream():
 
 @bp.route('/api/combine-inventory', methods=['POST'])
 def trigger_combine():
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         print("Starting inventory combination process...")
         
@@ -198,6 +203,8 @@ def trigger_combine():
 
 @bp.route('/api/yield', methods=['POST'])
 def trigger_yield():
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         print("Starting yield calculation process...")
         
@@ -293,6 +300,8 @@ def trigger_scrape_cm():
     to match the PMS scraper's range. Progress streams over /api/scrape-cm/stream
     (scrape_cm_inventory's own step logs already push onto the shared log_queue).
     """
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         data = request.get_json(silent=True) or {}
         username = data.get('dedgeUsername')
@@ -326,6 +335,8 @@ def trigger_scrape_cm():
 
 @bp.route('/api/custom-yield', methods=['POST'])
 def trigger_custom_yield():
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         print("Starting custom yield calculation process...")
         
@@ -380,88 +391,18 @@ def trigger_custom_yield():
                 "message": "Combined inventory database not found. Please run combine inventory first."
             }), 400
 
-        # Import the yielder module
-        from ..scraper.yielder import load_and_clean_data, apply_yield_matrix
-
-        # Load and clean data with custom configuration
-        data = load_and_clean_data(
-            demand_bins=config['demand_bins'],
-            demand_labels=config['demand_labels']
-        )
-        
-        if data is None:
+        # Run the compute-and-write step (load, yield, persist to
+        # inventory_allocation.db) via the shared yielder helper, so the
+        # automated pipeline can reuse the exact same logic without going
+        # through this HTTP route.
+        config['bar_level_shift'] = bar_level_shift
+        try:
+            result = apply_custom_yield(config)
+        except FileNotFoundError as e:
             return jsonify({
                 "status": "error",
-                "message": "Failed to load and clean data"
-            }), 500
-
-        # Apply yield matrix with custom configuration. Custom yield only covers
-        # Deluxe and Premiere rooms, so the simple room types are skipped and the
-        # threshold percentages (e.g. 5 / 20) are converted to fractions.
-        result = apply_yield_matrix(
-            data,
-            very_low_threshold_pct=config['very_low_threshold_pct'] / 100,
-            low_threshold_pct=config['low_threshold_pct'] / 100,
-            room_caps=config['room_caps'],
-            include_simple_rooms=False,
-            deluxe_override_occupancy=config['deluxe_override_occupancy'],
-            deluxe_override_premiere=config['deluxe_override_premiere'],
-            deluxe_override_amount=config['deluxe_override_amount'],
-            bar_level_shift=bar_level_shift
-        )
-
-        # Rename and select the Deluxe/Premiere output columns to match the
-        # frontend table headers (and the default /api/yield output).
-        result = result.rename(columns={
-            'Deluxe Room': 'Deluxe Remaining Inventory',
-            'Premiere Room': 'Premiere Remaining Inventory'
-        })
-        result = result[[
-            'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
-            'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
-            'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
-        ]]
-        result['Occupancy'] = result['Occupancy'].round(2)
-
-        # Save to database
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'inventory_allocation.db')
-        conn = sqlite3.connect(db_path)
-        
-        # Enable date handling in SQLite
-        conn.execute('PRAGMA foreign_keys = ON')
-        
-        # Define SQLite data types for each column
-        dtype = {
-            'Date': 'DATE',
-            'DayOfWeek': 'TEXT',
-            'Season': 'TEXT',
-            'Occupancy': 'REAL',
-            'DemandLevel': 'TEXT',
-            'Deluxe Remaining Inventory': 'INTEGER',
-            'Deluxe Online Inventory': 'INTEGER',
-            'Deluxe BAR Rate': 'TEXT',
-            'Premiere Remaining Inventory': 'INTEGER',
-            'Premiere Online Inventory': 'INTEGER',
-            'Premiere BAR Rate': 'TEXT'
-        }
-        
-        # Ensure date is in YYYY-MM-DD format before saving
-        result['Date'] = pd.to_datetime(result['Date']).dt.strftime('%Y-%m-%d')
-        
-        # Save to database
-        result.to_sql('daily_inventory_allocation', conn, if_exists='replace', index=False, dtype=dtype)
-        
-        # Verify the data was written
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM daily_inventory_allocation")
-        count = cursor.fetchone()[0]
-        conn.close()
-
-        if count == 0:
-            return jsonify({
-                "status": "error",
-                "message": "No data was written to the inventory allocation database"
-            }), 500
+                "message": str(e)
+            }), 400
 
         # Convert the result to a format that can be serialized to JSON
         result_dict = result.to_dict(orient='records')
@@ -524,6 +465,8 @@ def stream_allotment_logs():
 @bp.route('/api/update-allotment', methods=['POST'])
 def trigger_update_allotment():
     """Trigger allotment update process"""
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         data = request.get_json()
         username = data.get('username')
@@ -612,6 +555,8 @@ def resume_update_allotment():
 @bp.route('/api/update-rest-allotment', methods=['POST'])
 def trigger_update_rest_allotment():
     """Trigger allotment update process for the 11 room types other than Deluxe/Premiere"""
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         data = request.get_json()
         username = data.get('username')
@@ -692,6 +637,8 @@ def trigger_update_bar():
     DEDGE_PASSWORD env vars, and login is skipped entirely when the persistent
     Chrome profile already holds a valid session.
     """
+    if pipeline_runner.pipeline_active:
+        return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         data = request.get_json(silent=True) or {}
         username = data.get('username')

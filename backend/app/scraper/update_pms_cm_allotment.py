@@ -292,196 +292,194 @@ ROOM_TYPE_CONFIG = {
     "premiere": {"csv_column": "Premiere Online Inventory", "checkbox_value": "PRKG", "label": "Premiere"},
 }
 
-def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe", headless=None):
-    """
-    Login to the website and select the hotel brand
-    Returns True if successful, False otherwise
+def _login_and_prepare(driver, username, password):
+    """Login, select brand/hotel, and navigate to the allotment detail page.
 
-    max_dates: if set, only process the first N dates from the allocation DB (for testing).
-    room_type: "deluxe" or "premiere" - which column/room-type checkbox to update.
-    headless: run Chrome headless (None -> honour the SELENIUM_HEADLESS env var).
-    Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
+    This is the expensive, fragile part of update_allotmet (full page loads,
+    dropdown population waits, etc) - split out so a caller that needs to
+    process multiple room types (e.g. Deluxe then Premiere) can run it once
+    and then call _process_room_type() repeatedly on the same already-open
+    page, instead of tearing back down to the login screen and redoing all of
+    this per room type. Raises on failure.
     """
-    username = username or os.environ.get("PMS_USERNAME", "")
-    password = password or os.environ.get("PMS_PASSWORD", "")
+    # Navigate to the website
+    driver.get("https://fo.hospitality.mykg.id/")
+    log(driver, "Navigating to Hospitality Suite website...")
+
+    # Wait for page to load completely
+    wait_for_page_load(driver)
+
+    # Wait for the username field to be present and interactable
+    username_field = wait_for_element_presence(driver, By.ID, "txtUsername", timeout=15, description="username field")
+    if not username_field:
+        raise Exception("Username field not found")
+
+    # Ensure the field is interactable
+    WebDriverWait(driver, 5).until(
+        EC.element_to_be_clickable((By.ID, "txtUsername"))
+    )
+    username_field.clear()
+    username_field.send_keys(username)
+
+    password_field = driver.find_element(By.ID, "txtPassword")
+    password_field.clear()
+    password_field.send_keys(password)
+
+    # Click the login button
+    if not wait_and_click(driver, By.ID, "btnLogin", description="login button"):
+        raise Exception("Failed to click login button")
+
+    log(driver, "Login credentials entered...")
+
+    # Wait for login to complete
+    wait_for_page_load(driver)
+    wait_for_toast_disappear(driver)
+
+    # Wait for the brand dropdown to be present and interactable
+    log(driver, "Waiting for brand dropdown to be ready...")
+    WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.ID, "className"))
+    )
+    WebDriverWait(driver, 15).until(
+        EC.element_to_be_clickable((By.ID, "className"))
+    )
+
+    # Wait for the brand dropdown and select "The ANVAYA"
+    brand_select_elem = driver.find_element(By.ID, "className")
+    if not brand_select_elem:
+        raise Exception("Brand dropdown not found")
+
+    # Wait for brand options to be populated
+    def brand_options_loaded(driver):
+        try:
+            brand_select = Select(driver.find_element(By.ID, "className"))
+            options = [o.text for o in brand_select.options]
+            log(driver, f"Current brand options: {options}")
+            return len(options) > 1  # More than just "Select Brand"
+        except:
+            return False
+
+    log(driver, "Waiting for brand options to load...")
+    # Try multiple times to wait for options
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            WebDriverWait(driver, 15).until(brand_options_loaded)
+            break
+        except TimeoutException:
+            if attempt < max_attempts - 1:
+                log(driver, f"Attempt {attempt + 1} failed, brand options never populated - reloading page and retrying...")
+                # Use a fresh GET instead of driver.refresh() - refreshing a page reached via a
+                # login POST can trigger Chrome's "Confirm Form Resubmission" dialog, which blocks
+                # the reload silently (the stale DOM stays visible, so presence checks pass while
+                # the page never actually re-fetches the data that populates the dropdown).
+                driver.get(driver.current_url)
+                wait_for_page_load(driver)
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.ID, "className"))
+                )
+            else:
+                raise Exception("Brand options failed to load after multiple attempts")
+
+    # Print all available options for debugging
+    brand_select = Select(brand_select_elem)
+    available_options = [option.text for option in brand_select.options]
+    log(driver, f"Available brand options: {available_options}")
+
+    # Try different variations of the brand name
+    brand_name_variations = ["The ANVAYA", "THE ANVAYA", "The Anvaya", "THE ANVAYA BEACH RESORT BALI"]
+    selected = False
+
+    for brand_name in brand_name_variations:
+        try:
+            log(driver, f"Attempting to select brand: {brand_name}")
+            brand_select.select_by_visible_text(brand_name)
+            selected = True
+            log(driver, f"Successfully selected brand: {brand_name}")
+            break
+        except NoSuchElementException:
+            log(driver, f"Brand name '{brand_name}' not found in dropdown")
+            continue
+
+    if not selected:
+        raise Exception(f"Could not find any matching brand name. Available options: {available_options}")
+
+    # Wait for the hotel dropdown to be populated
+    def hotel_option_loaded(driver):
+        try:
+            hotel_select_elem = driver.find_element(By.ID, "hotelName")
+            options = [o.text for o in hotel_select_elem.find_elements(By.TAG_NAME, "option")]
+            log(driver, f"Available hotel options: {options}")
+            return len(options) > 1  # More than just "Select Hotel"
+        except Exception as e:
+            log(driver, f"Error checking hotel options: {str(e)}")
+            return False
+
+    log(driver, "Waiting for hotel options to load...")
+    WebDriverWait(driver, 15).until(hotel_option_loaded)
+
+    hotel_select_elem = driver.find_element(By.ID, "hotelName")
+    hotel_select = Select(hotel_select_elem)
+    log(driver, "Attempting to select hotel: The ANVAYA Beach Resort Bali")
+    hotel_select.select_by_visible_text("The ANVAYA Beach Resort Bali")
+    log(driver, "Hotel selected successfully")
+
+    # Wait for selection to take effect
+    wait_for_page_load(driver)
+
+    # Click Rate Management menu
+    rate_management_link = wait_for_element_presence(
+        driver,
+        By.CSS_SELECTOR,
+        'a[data-appid="4"]',
+        timeout=15,
+        description="Rate Management menu"
+    )
+    if not rate_management_link:
+        raise Exception("Rate Management menu not found")
+
+    if not wait_and_click(driver, By.CSS_SELECTOR, 'a[data-appid="4"]', description="Rate Management menu"):
+        raise Exception("Failed to click Rate Management menu")
+
+    # Wait for page to load after clicking
+    wait_for_page_load(driver)
+
+    # Click Allotment in the navigation
+    log(driver, "Looking for Allotment menu...")
+    allotment_link = wait_for_element_presence(
+        driver,
+        By.XPATH,
+        "//span[contains(text(), 'Allotment')]/parent::a",
+        timeout=15,
+        description="Allotment menu"
+    )
+    if not allotment_link:
+        raise Exception("Allotment menu not found")
+
+    if not wait_and_click(driver, By.XPATH, "//span[contains(text(), 'Allotment')]/parent::a", description="Allotment menu"):
+        raise Exception("Failed to click Allotment menu")
+
+    # Wait for page to load after clicking
+    wait_for_page_load(driver)
+    log(driver, "Successfully clicked Allotment menu")
+
+    # Navigate directly to the allotment detail page
+    log(driver, "Navigating to allotment detail page...")
+    driver.get("https://fo.hospitality.mykg.id/allotment/detail?companyid=1001")
+
+    # Wait for page to load
+    wait_for_page_load(driver)
+    log(driver, "Successfully navigated to allotment detail page")
+
+
+def _process_room_type(driver, room_type, max_dates=None):
+    """Push allotment changes for one room type. Assumes the driver is
+    already on the allotment detail page (i.e. _login_and_prepare already
+    ran in this session). Returns True on success, False on failure - does
+    not raise, matching update_allotmet's original contract.
+    """
     room_config = ROOM_TYPE_CONFIG[room_type]
     try:
-        # If no driver is provided, create a new one
-        if driver is None:
-            driver = setup_driver(headless=headless)
-            should_quit_driver = False
-        else:
-            should_quit_driver = False
-
-        # Navigate to the website
-        driver.get("https://fo.hospitality.mykg.id/")
-        log(driver, "Navigating to Hospitality Suite website...")
-        
-        # Wait for page to load completely
-        wait_for_page_load(driver)
-        
-        # Wait for the username field to be present and interactable
-        username_field = wait_for_element_presence(driver, By.ID, "txtUsername", timeout=15, description="username field")
-        if not username_field:
-            raise Exception("Username field not found")
-        
-        # Ensure the field is interactable
-        WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.ID, "txtUsername"))
-        )
-        username_field.clear()
-        username_field.send_keys(username)
-        
-        password_field = driver.find_element(By.ID, "txtPassword")
-        password_field.clear()
-        password_field.send_keys(password)
-        
-        # Click the login button
-        if not wait_and_click(driver, By.ID, "btnLogin", description="login button"):
-            raise Exception("Failed to click login button")
-        
-        log(driver, "Login credentials entered...")
-        
-        # Wait for login to complete
-        wait_for_page_load(driver)
-        wait_for_toast_disappear(driver)
-        
-        # Wait for the brand dropdown to be present and interactable
-        log(driver, "Waiting for brand dropdown to be ready...")
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.ID, "className"))
-        )
-        WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.ID, "className"))
-        )
-        
-        # Wait for the brand dropdown and select "The ANVAYA"
-        brand_select_elem = driver.find_element(By.ID, "className")
-        if not brand_select_elem:
-            raise Exception("Brand dropdown not found")
-        
-        # Wait for brand options to be populated
-        def brand_options_loaded(driver):
-            try:
-                brand_select = Select(driver.find_element(By.ID, "className"))
-                options = [o.text for o in brand_select.options]
-                log(driver, f"Current brand options: {options}")
-                return len(options) > 1  # More than just "Select Brand"
-            except:
-                return False
-            
-        log(driver, "Waiting for brand options to load...")
-        # Try multiple times to wait for options
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                WebDriverWait(driver, 15).until(brand_options_loaded)
-                break
-            except TimeoutException:
-                if attempt < max_attempts - 1:
-                    log(driver, f"Attempt {attempt + 1} failed, brand options never populated - reloading page and retrying...")
-                    # Use a fresh GET instead of driver.refresh() - refreshing a page reached via a
-                    # login POST can trigger Chrome's "Confirm Form Resubmission" dialog, which blocks
-                    # the reload silently (the stale DOM stays visible, so presence checks pass while
-                    # the page never actually re-fetches the data that populates the dropdown).
-                    driver.get(driver.current_url)
-                    wait_for_page_load(driver)
-                    WebDriverWait(driver, 15).until(
-                        EC.presence_of_element_located((By.ID, "className"))
-                    )
-                else:
-                    raise Exception("Brand options failed to load after multiple attempts")
-        
-        # Print all available options for debugging
-        brand_select = Select(brand_select_elem)
-        available_options = [option.text for option in brand_select.options]
-        log(driver, f"Available brand options: {available_options}")
-        
-        # Try different variations of the brand name
-        brand_name_variations = ["The ANVAYA", "THE ANVAYA", "The Anvaya", "THE ANVAYA BEACH RESORT BALI"]
-        selected = False
-        
-        for brand_name in brand_name_variations:
-            try:
-                log(driver, f"Attempting to select brand: {brand_name}")
-                brand_select.select_by_visible_text(brand_name)
-                selected = True
-                log(driver, f"Successfully selected brand: {brand_name}")
-                break
-            except NoSuchElementException:
-                log(driver, f"Brand name '{brand_name}' not found in dropdown")
-                continue
-        
-        if not selected:
-            raise Exception(f"Could not find any matching brand name. Available options: {available_options}")
-        
-        # Wait for the hotel dropdown to be populated
-        def hotel_option_loaded(driver):
-            try:
-                hotel_select_elem = driver.find_element(By.ID, "hotelName")
-                options = [o.text for o in hotel_select_elem.find_elements(By.TAG_NAME, "option")]
-                log(driver, f"Available hotel options: {options}")
-                return len(options) > 1  # More than just "Select Hotel"
-            except Exception as e:
-                log(driver, f"Error checking hotel options: {str(e)}")
-                return False
-            
-        log(driver, "Waiting for hotel options to load...")
-        WebDriverWait(driver, 15).until(hotel_option_loaded)
-        
-        hotel_select_elem = driver.find_element(By.ID, "hotelName")
-        hotel_select = Select(hotel_select_elem)
-        log(driver, "Attempting to select hotel: The ANVAYA Beach Resort Bali")
-        hotel_select.select_by_visible_text("The ANVAYA Beach Resort Bali")
-        log(driver, "Hotel selected successfully")
-        
-        # Wait for selection to take effect
-        wait_for_page_load(driver)
-        
-        # Click Rate Management menu
-        rate_management_link = wait_for_element_presence(
-            driver, 
-            By.CSS_SELECTOR, 
-            'a[data-appid="4"]',
-            timeout=15,
-            description="Rate Management menu"
-        )
-        if not rate_management_link:
-            raise Exception("Rate Management menu not found")
-            
-        if not wait_and_click(driver, By.CSS_SELECTOR, 'a[data-appid="4"]', description="Rate Management menu"):
-            raise Exception("Failed to click Rate Management menu")
-            
-        # Wait for page to load after clicking
-        wait_for_page_load(driver)
-        
-        # Click Allotment in the navigation
-        log(driver, "Looking for Allotment menu...")
-        allotment_link = wait_for_element_presence(
-            driver,
-            By.XPATH,
-            "//span[contains(text(), 'Allotment')]/parent::a",
-            timeout=15,
-            description="Allotment menu"
-        )
-        if not allotment_link:
-            raise Exception("Allotment menu not found")
-            
-        if not wait_and_click(driver, By.XPATH, "//span[contains(text(), 'Allotment')]/parent::a", description="Allotment menu"):
-            raise Exception("Failed to click Allotment menu")
-            
-        # Wait for page to load after clicking
-        wait_for_page_load(driver)
-        log(driver, "Successfully clicked Allotment menu")
-        
-        # Navigate directly to the allotment detail page
-        log(driver, "Navigating to allotment detail page...")
-        driver.get("https://fo.hospitality.mykg.id/allotment/detail?companyid=1001")
-        
-        # Wait for page to load
-        wait_for_page_load(driver)
-        log(driver, "Successfully navigated to allotment detail page")
-        
         # Read and process allocation data
         log(driver, "Reading allocation data...")
         date_inventory = []
@@ -500,7 +498,7 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
         except Exception as e:
             log(driver, f"Error reading allocation data: {str(e)}")
             raise
-        
+
         # Collapse consecutive same-inventory days into contiguous date ranges
         log(driver, "Building contiguous date ranges...")
         runs = []
@@ -630,16 +628,63 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
                 log(driver, f"Successfully processed batch {batch_index + 1} of {total_batches} for inventory value {inventory_value}")
                 # Wait a bit before processing next batch
                 time.sleep(2)
-        log(driver, "Successfully processed all dates from CSV")
+        log(driver, f"Successfully processed all dates from CSV for {room_config['label']}")
         return True
-        
+
     except Exception as e:
         log(driver, f"An error occurred: {str(e)}")
         return False
-        
-    finally:
-        if should_quit_driver and driver:
-            pass
+
+
+def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe", headless=None):
+    """
+    Login to the website, select the hotel brand, and push allotment changes
+    for a single room type. Returns True if successful, False otherwise.
+
+    max_dates: if set, only process the first N dates from the allocation DB (for testing).
+    room_type: "deluxe" or "premiere" - which column/room-type checkbox to update.
+    headless: run Chrome headless (None -> honour the SELENIUM_HEADLESS env var).
+    Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
+    """
+    username = username or os.environ.get("PMS_USERNAME", "")
+    password = password or os.environ.get("PMS_PASSWORD", "")
+    if driver is None:
+        driver = setup_driver(headless=headless)
+    try:
+        _login_and_prepare(driver, username, password)
+    except Exception as e:
+        log(driver, f"An error occurred: {str(e)}")
+        return False
+    return _process_room_type(driver, room_type, max_dates=max_dates)
+
+
+def update_allotment_multi(driver=None, username=None, password=None, max_dates=None,
+                            room_types=("deluxe", "premiere"), headless=None):
+    """Login once and push allotment changes for multiple room types in the
+    same browser session, without navigating back to the login page between
+    them. update_allotmet() re-runs the full login/brand/hotel/menu flow on
+    every call, which is redundant when processing several room types back
+    to back - and re-navigating to the site root while already authenticated
+    can land the second run somewhere the login form doesn't expect, causing
+    it to fail. Returns True only if every room type succeeds.
+    """
+    username = username or os.environ.get("PMS_USERNAME", "")
+    password = password or os.environ.get("PMS_PASSWORD", "")
+    if driver is None:
+        driver = setup_driver(headless=headless)
+    try:
+        _login_and_prepare(driver, username, password)
+    except Exception as e:
+        log(driver, f"An error occurred: {str(e)}")
+        return False
+
+    for room_type in room_types:
+        label = ROOM_TYPE_CONFIG[room_type]['label']
+        log(driver, f"--- Updating {label} allotment (same session) ---")
+        if not _process_room_type(driver, room_type, max_dates=max_dates):
+            log(driver, f"{label} allotment update failed - stopping before remaining room types")
+            return False
+    return True
 
 def wait_for_datepicker(driver, timeout=10):
     """Wait for datepicker to be visible"""

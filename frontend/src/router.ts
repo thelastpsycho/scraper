@@ -5,6 +5,7 @@ import Yielder from './views/Yielder.vue'
 import Data from './views/Data.vue'
 import Allotment from './views/Allotment.vue'
 import BarCalculator from './views/BarCalculator.vue'
+import Pipeline from './views/Pipeline.vue'
 import Chat from './views/Chat.vue'
 
 const router = createRouter({
@@ -39,6 +40,11 @@ const router = createRouter({
       path: '/bar-calculator',
       name: 'bar-calculator',
       component: BarCalculator
+    },
+    {
+      path: '/pipeline',
+      name: 'pipeline',
+      component: Pipeline
     },
     {
       path: '/chat',

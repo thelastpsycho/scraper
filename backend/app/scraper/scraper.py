@@ -114,10 +114,13 @@ def wait_for_table_load(driver, timeout=20):
         print(f"Error waiting for table load: {e}")
         return None
 
-def setup_driver():
+def setup_driver(headless=None):
     # Set up Chrome options
     chrome_options = Options()
-    # chrome_options.add_argument('--headless=new')
+    if headless is None:
+        headless = os.environ.get('SELENIUM_HEADLESS', '').lower() in ('1', 'true', 'yes')
+    if headless:
+        chrome_options.add_argument('--headless=new')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -133,7 +136,7 @@ def setup_driver():
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 
-def scrape_pms_inventory(start_date=None, username=None, password=None):
+def scrape_pms_inventory(start_date=None, username=None, password=None, headless=None):
     """
     Scrape PMS inventory data from the website.
 
@@ -150,7 +153,7 @@ def scrape_pms_inventory(start_date=None, username=None, password=None):
     data_dir = os.path.join(current_dir, 'data')
     os.makedirs(data_dir, exist_ok=True)
 
-    driver = setup_driver()
+    driver = setup_driver(headless=headless)
     try:
         # Navigate to the website
         driver.get("https://fo.hospitality.mykg.id/")

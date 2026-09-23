@@ -395,6 +395,75 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
 
     return data
 
+def apply_custom_yield(config):
+    """Run the Deluxe/Premiere-only custom yield calculation (from a
+    /api/custom-yield-shaped config dict) and persist the result to
+    inventory_allocation.db. Raises FileNotFoundError if combined_inventory.db
+    is missing, or RuntimeError if the load/compute/write step fails, instead
+    of returning None, so callers can catch and report a clear error."""
+    combined_db_path = os.path.join(DATA_DIR, 'combined_inventory.db')
+    if not os.path.exists(combined_db_path):
+        raise FileNotFoundError("Combined inventory database not found. Please run combine inventory first.")
+
+    data = load_and_clean_data(
+        demand_bins=config['demand_bins'],
+        demand_labels=config['demand_labels']
+    )
+    if data is None:
+        raise RuntimeError("Failed to load and clean data")
+
+    bar_level_shift = int(config.get('bar_level_shift', 0) or 0)
+
+    result = apply_yield_matrix(
+        data,
+        very_low_threshold_pct=config['very_low_threshold_pct'] / 100,
+        low_threshold_pct=config['low_threshold_pct'] / 100,
+        room_caps=config['room_caps'],
+        include_simple_rooms=False,
+        deluxe_override_occupancy=config['deluxe_override_occupancy'],
+        deluxe_override_premiere=config['deluxe_override_premiere'],
+        deluxe_override_amount=config['deluxe_override_amount'],
+        bar_level_shift=bar_level_shift
+    )
+
+    # Rename and select the Deluxe/Premiere output columns to match the
+    # frontend table headers (and the default /api/yield output).
+    result = result.rename(columns={
+        'Deluxe Room': 'Deluxe Remaining Inventory',
+        'Premiere Room': 'Premiere Remaining Inventory'
+    })
+    result = result[[
+        'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
+        'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
+        'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
+    ]]
+    result['Occupancy'] = result['Occupancy'].round(2)
+    result['Date'] = pd.to_datetime(result['Date']).dt.strftime('%Y-%m-%d')
+
+    db_path = os.path.join(DATA_DIR, 'inventory_allocation.db')
+    conn = sqlite3.connect(db_path)
+    conn.execute('PRAGMA foreign_keys = ON')
+    dtype = {
+        'Date': 'DATE',
+        'DayOfWeek': 'TEXT',
+        'Season': 'TEXT',
+        'Occupancy': 'REAL',
+        'DemandLevel': 'TEXT',
+        'Deluxe Remaining Inventory': 'INTEGER',
+        'Deluxe Online Inventory': 'INTEGER',
+        'Deluxe BAR Rate': 'TEXT',
+        'Premiere Remaining Inventory': 'INTEGER',
+        'Premiere Online Inventory': 'INTEGER',
+        'Premiere BAR Rate': 'TEXT'
+    }
+    result.to_sql('daily_inventory_allocation', conn, if_exists='replace', index=False, dtype=dtype)
+    count = conn.execute("SELECT COUNT(*) FROM daily_inventory_allocation").fetchone()[0]
+    conn.close()
+    if count == 0:
+        raise RuntimeError("No data was written to the inventory allocation database")
+
+    return result
+
 # Main execution
 def main():
     try:

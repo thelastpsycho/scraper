@@ -19,7 +19,9 @@ def create_app():
     # Register blueprints here
     from .routes import main
     from .routes import database_routes
+    from .routes import pipeline_routes
     app.register_blueprint(main.bp)
     app.register_blueprint(database_routes.bp)
+    app.register_blueprint(pipeline_routes.bp)
     
     return app 
