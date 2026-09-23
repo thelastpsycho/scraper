@@ -1,11 +1,11 @@
 import pandas as pd
 import os
 import sqlite3
+from ..infrastructure.paths import get_data_dir
 
 def process_pms_inventory(df=None):
     # Get the absolute path to the data directory within the scraper folder
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, 'data')
+    data_dir = get_data_dir()
     
     # Print the paths for debugging
     print(f"Current directory: {current_dir}")

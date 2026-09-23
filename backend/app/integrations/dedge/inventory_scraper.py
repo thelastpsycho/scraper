@@ -10,7 +10,7 @@ Planning/Monthly/Export, which redirects to a token URL that streams back the
 `execute_async_script`) so it runs inside the already-authenticated browser
 tab rather than a separate Python HTTP client.
 
-update_bar.py's ensure_logged_in() only checks session validity against the
+bar_updater.py's ensure_logged_in() only checks session validity against the
 pricing-grid page (Plannings/.../pricinggrid/apply), which - inconsistently
 with the rest of the site - does NOT enforce the "new device" check the way
 Planning/Monthly does. So a session that looks valid there can still bounce
@@ -18,7 +18,7 @@ to the device-verification page the moment we load Planning/Monthly. We check
 again after navigating there and, same as ensure_logged_in, block for a human
 to enter the emailed code in the visible browser window if needed.
 
-Login reuses update_bar.py's D-EDGE session handling (persistent Chrome
+Login reuses bar_updater.py's D-EDGE session handling (persistent Chrome
 profile so the "new device" email code is only needed once).
 """
 
@@ -26,8 +26,8 @@ import base64
 import os
 from datetime import datetime, timedelta
 
-from .process_cm_inventory import process_cm_inventory
-from .update_bar import (
+from ...inventory.channel_manager_processor import process_cm_inventory
+from .bar_updater import (
     DEFAULT_PROFILE_DIR,
     HOTEL_ID,
     _wait_for_device_authorization,
@@ -95,8 +95,8 @@ def scrape_cm_inventory(driver=None, start_date=None, days=100, username=None, p
     username = username or os.environ.get("DEDGE_USERNAME", "")
     password = password or os.environ.get("DEDGE_PASSWORD", "")
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, "data")
+    from ...infrastructure.paths import get_data_dir
+    data_dir = get_data_dir()
     os.makedirs(data_dir, exist_ok=True)
 
     owns_driver = driver is None

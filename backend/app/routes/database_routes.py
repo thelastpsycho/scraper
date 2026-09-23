@@ -3,12 +3,12 @@ import sqlite3
 import os
 import logging
 from datetime import datetime, timezone
+from ..infrastructure.paths import get_data_path
 
 bp = Blueprint('database', __name__)
 
 def get_db_path(db_name):
-    current_dir = os.path.dirname(os.path.dirname(__file__))  # backend/app
-    return os.path.join(current_dir, 'scraper', 'data', db_name)
+    return get_data_path(db_name)
 
 def get_updated_at(db_name):
     """Last-modified time of a data file, as an ISO 8601 UTC string - shown in the

@@ -1,12 +1,12 @@
 import pandas as pd
 import os
 import sqlite3
+from ..infrastructure.paths import get_data_dir
 
 def combine_inventory_files():
     try:
         # Get the absolute path to the data directory within the scraper folder
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.join(current_dir, 'data')
+        data_dir = get_data_dir()
         os.makedirs(data_dir, exist_ok=True)
         
         # Print paths for debugging

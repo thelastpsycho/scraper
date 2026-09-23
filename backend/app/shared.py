@@ -7,8 +7,8 @@ log_queue = queue.Queue()
 
 class RunControl:
     """Cooperative stop/pause signaling for the background allotment-update
-    thread. Checked once per batch iteration in update_pms_cm_allotment.py
-    and update_rest_allotment.py."""
+    thread. Checked once per batch iteration in integrations/pms/allotment_updater.py
+    and integrations/pms/other_room_allotment_updater.py."""
 
     def __init__(self):
         self.stop_event = threading.Event()

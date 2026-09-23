@@ -26,14 +26,14 @@ import queue
 from datetime import datetime
 from io import StringIO
 
-from .shared import log_queue, allotment_run_control
-from .scraper.scraper import scrape_pms_inventory
-from .scraper.cm_scraper import scrape_cm_inventory
-from .scraper.combine_inventory import combine_inventory_files
-from .scraper.yielder import apply_custom_yield
-from .scraper.update_pms_cm_allotment import update_allotment_multi, setup_driver as pms_allot_setup_driver
-from .scraper.update_bar import update_bar, setup_driver as dedge_setup_driver, DEFAULT_PROFILE_DIR
-from .routes.database_routes import get_db_path
+from ..shared import log_queue, allotment_run_control
+from ..integrations.pms.inventory_scraper import scrape_pms_inventory
+from ..integrations.dedge.inventory_scraper import scrape_cm_inventory
+from ..inventory.inventory_combiner import combine_inventory_files
+from ..revenue.yield_engine import apply_custom_yield
+from ..integrations.pms.allotment_updater import update_allotment_multi, setup_driver as pms_allot_setup_driver
+from ..integrations.dedge.bar_updater import update_bar, setup_driver as dedge_setup_driver, DEFAULT_PROFILE_DIR
+from ..routes.database_routes import get_db_path
 
 STEPS = [
     {"id": "scrape_pms", "label": "Scrape PMS inventory"},
@@ -335,7 +335,7 @@ def run_pipeline(config):
         # dedge_driver is deliberately NOT quit here - it uses the persistent
         # D-EDGE profile so leaving it open preserves the trusted-device
         # session for next time, matching the existing convention in
-        # cm_scraper.py / update_bar.py.
+        # dedge/inventory_scraper.py / dedge/bar_updater.py.
         stop_flag.set()
         forwarder.join(timeout=5)
         pipeline_current_step = None

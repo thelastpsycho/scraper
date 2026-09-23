@@ -1,6 +1,6 @@
-"""Single source of truth for the yielder -> allotment-updater handoff.
+"""Single source of truth for the yield engine -> allotment-updater handoff.
 
-The yielder writes the daily allocation matrix to ``inventory_allocation.db``
+The yield engine writes the daily allocation matrix to ``inventory_allocation.db``
 (table ``daily_inventory_allocation``). The allotment-updater flows read it back
 through :func:`load_allocation_rows`, which returns the same list-of-dicts shape
 the old ``daily_inventory_allocation_seasonal.csv`` produced so callers keep
@@ -9,8 +9,9 @@ strptime-ing ``row['Date']`` and ``int(row[<column>])`` exactly as before.
 
 import os
 import sqlite3
+from ..infrastructure.paths import get_data_dir
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+DATA_DIR = get_data_dir()
 ALLOCATION_DB_PATH = os.path.join(DATA_DIR, 'inventory_allocation.db')
 ALLOCATION_TABLE = 'daily_inventory_allocation'
 

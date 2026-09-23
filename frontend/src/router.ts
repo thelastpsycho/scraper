@@ -1,12 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Home from './views/Home.vue'
-import Scraping from './views/Scraping.vue'
-import Yielder from './views/Yielder.vue'
-import Data from './views/Data.vue'
-import Allotment from './views/Allotment.vue'
-import BarCalculator from './views/BarCalculator.vue'
-import Pipeline from './views/Pipeline.vue'
-import Chat from './views/Chat.vue'
+import DashboardView from './views/DashboardView.vue'
+import InventoryCollectionView from './views/InventoryCollectionView.vue'
+import YieldManagementView from './views/YieldManagementView.vue'
+import InventoryDataView from './views/InventoryDataView.vue'
+import AllotmentManagementView from './views/AllotmentManagementView.vue'
+import BarPricingView from './views/BarPricingView.vue'
+import AutomationPipelineView from './views/AutomationPipelineView.vue'
+import InventoryAssistantView from './views/InventoryAssistantView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -14,42 +14,42 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: Home
+      component: DashboardView
     },
     {
       path: '/scraping',
       name: 'scraping',
-      component: Scraping
+      component: InventoryCollectionView
     },
     {
       path: '/yielder',
       name: 'yielder',
-      component: Yielder
+      component: YieldManagementView
     },
     {
       path: '/data',
       name: 'data',
-      component: Data
+      component: InventoryDataView
     },
     {
       path: '/allotment',
       name: 'allotment',
-      component: Allotment
+      component: AllotmentManagementView
     },
     {
       path: '/bar-calculator',
       name: 'bar-calculator',
-      component: BarCalculator
+      component: BarPricingView
     },
     {
       path: '/pipeline',
       name: 'pipeline',
-      component: Pipeline
+      component: AutomationPipelineView
     },
     {
       path: '/chat',
       name: 'chat',
-      component: Chat
+      component: InventoryAssistantView
     }
   ]
 })
