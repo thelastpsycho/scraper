@@ -206,7 +206,7 @@
         <details class="neu-card overflow-hidden p-4">
           <summary class="cursor-pointer text-sm font-semibold text-app-tertiary">
             Yield configuration
-            <span class="ml-1 text-xs font-normal text-slate-500">(same as Yielder page)</span>
+            <span class="ml-1 text-xs font-normal text-slate-500">(same as Yield Management page)</span>
           </summary>
           <div class="mt-3 space-y-3">
             <div>
@@ -366,7 +366,7 @@ const yieldForm = ref<YieldConfigForm>({
   room_caps: { ...defaultYieldConfig.room_caps },
 })
 
-// Same parse logic as Yielder.vue's calculateYield(), so the payload we send
+// Same parse logic as YieldManagementView.vue's calculateYield(), so the payload we send
 // as yieldConfig is byte-compatible with what /api/custom-yield already expects.
 function parseArrayInput(input: string | any[]): any[] {
   if (Array.isArray(input)) return input

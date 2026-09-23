@@ -3,6 +3,7 @@ from tabulate import tabulate
 from datetime import datetime
 import os
 import sqlite3
+from ..infrastructure.paths import get_data_dir
 
 # Demand level configuration
 DEMAND_BINS = [0, 70, 85, 100]  # Bins for Low, Medium, High demand
@@ -40,8 +41,7 @@ DELUXE_OVERRIDE_PREMIERE = 31   # Override threshold for Premiere inventory
 DELUXE_OVERRIDE_AMOUNT = 2      # Amount of Deluxe rooms to open in override
 
 # Get the absolute path to the data directory within the scraper folder
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(CURRENT_DIR, 'data')
+DATA_DIR = get_data_dir()
 
 def get_online_allotment(remaining, room_cap):
     """Tiered bucket allotment: how many rooms to open online given how many remain."""

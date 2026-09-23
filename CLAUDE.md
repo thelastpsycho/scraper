@@ -1,65 +1,103 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with this repository.
 
 ## What this is
 
-A hotel revenue-management tool: a Selenium scraper pulls room-inventory data out of a hospitality PMS (`fo.hospitality.mykg.id`), combines it with manually-uploaded Channel Manager data, and runs a yield/demand pricing matrix over the result. A Vue frontend drives each stage and visualizes the output.
+A hotel inventory and revenue-automation tool. Selenium collects inventory from the hospitality PMS and D-EDGE, the backend normalizes and combines those datasets, a yield engine calculates online allocation/BAR decisions, and automation flows can push allotment and pricing changes back to the PMS and D-EDGE.
 
-- `backend/` — Flask API + Selenium scraping/automation pipeline
+- `backend/` — Flask API, data processing, Selenium integrations, and automation pipeline
 - `frontend/` — Vue 3 + TypeScript + Vite SPA
 
 ## Commands
 
 Backend (from `backend/`):
-```
+
+```bash
 pip install -r requirements.txt
-python run.py          # runs on http://0.0.0.0:5666 with debug=True
+python run.py
 ```
 
 Frontend (from `frontend/`):
-```
+
+```bash
 npm install
-npm run dev             # Vite dev server on :5173, proxies /api -> 127.0.0.1:5666
-npm run build            # vue-tsc typecheck + vite build
+npm run dev
+npm run build
 npm run preview
 ```
 
-There is no test suite or lint script configured in either package — don't assume `npm test`/`npm run lint` exist.
+There is currently no automated test suite or lint script configured.
 
 ## Backend architecture
 
-`backend/app/__init__.py` is a Flask app factory that registers two blueprints:
-- `routes/main.py` — triggers each pipeline stage and streams progress
-- `routes/database_routes.py` — read-only GET endpoints that dump each SQLite DB in `scraper/data/` as JSON
+`backend/app/__init__.py` is the Flask app factory and registers three blueprints:
 
-CORS is hardcoded in `create_app()` to a fixed list of frontend origins (`localhost:5173`, `127.0.0.1:5173`, a LAN IP) — update this list if the frontend is served from elsewhere.
+- `routes/main.py` — individual scrape/process/yield/allotment/BAR actions and SSE progress streams
+- `routes/database_routes.py` — read-only SQLite data endpoints
+- `routes/pipeline_routes.py` — end-to-end pipeline control and SSE progress stream
+
+Source code is organized by responsibility:
+
+- `integrations/pms/` — hospitality PMS scraping and allotment automation
+- `integrations/dedge/` — D-EDGE inventory scraping and BAR updates
+- `inventory/` — PMS/CM processing, inventory combination, allocation persistence
+- `revenue/` — yield engine and BAR-rate processing
+- `pipeline/` — full workflow orchestration
+- `infrastructure/` — shared runtime-path helpers
+
+### Runtime data
+
+For backward compatibility, runtime data intentionally remains in:
+
+`backend/app/scraper/data/`
+
+The source-code refactor does **not** move existing SQLite databases, uploads, screenshots, or HTML debug artifacts. The persistent D-EDGE Chrome profile also remains at:
+
+`backend/app/scraper/.dedge_profile/`
+
+Use `infrastructure/paths.py` instead of constructing these paths manually.
 
 ### Data pipeline
 
-Each stage in `backend/app/scraper/` reads the previous stage's SQLite DB and writes its own DB into `backend/app/scraper/data/`. SQLite is the single source of truth for every stage-to-stage handoff — stages no longer write per-run CSV mirrors. Endpoints check that the required upstream `.db` file exists before running, so stages must execute in order:
+1. `integrations/pms/inventory_scraper.py` — scrapes PMS availability and writes `pms_inventory_raw.db`, then runs PMS processing.
+2. `inventory/pms_processor.py` — writes `pms_inventory_processed.db`.
+3. `integrations/dedge/inventory_scraper.py` — exports D-EDGE room planning data and runs CM processing.
+4. `inventory/channel_manager_processor.py` — writes `cm_inventory_processed.db`.
+5. `inventory/inventory_combiner.py` — writes `combined_inventory.db`.
+6. `revenue/yield_engine.py` — writes `inventory_allocation.db` (table `daily_inventory_allocation`).
+7. `integrations/pms/allotment_updater.py` and `other_room_allotment_updater.py` — push calculated allotments into the PMS.
+8. `integrations/dedge/bar_updater.py` — pushes BAR levels into D-EDGE.
 
-1. **`scraper.py`** (`POST /api/scrape`) — Selenium logs into the PMS and scrapes room availability into `pms_inventory_raw.db`.
-2. **`process_pms_inventory.py`** — cleans the raw PMS data into `pms_inventory_processed.db`.
-3. **`process_cm_inventory.py`** (`POST /api/process-cm`) — processes a Channel Manager Excel file uploaded via `POST /api/upload-cm-excel` (saved as `data/cm_upload.xlsx`) into `cm_inventory_processed.db`.
-4. **`combine_inventory.py`** (`POST /api/combine-inventory`) — merges the two processed DBs into `combined_inventory.db`.
-5. **`yielder.py`** (`POST /api/yield`, or `POST /api/custom-yield` for a caller-supplied demand/threshold/room-cap config) — applies the yield/demand matrix to produce `inventory_allocation.db` (table `daily_inventory_allocation`).
-6. **`update_pms_cm_allotment.py`** (`POST /api/update-allotment`, Deluxe/Premiere) / **`update_rest_allotment.py`** (`POST /api/update-rest-allotment`, the other 11 room types) — separate Selenium flows that read the yielder's `inventory_allocation.db` (via `allocation_store.load_allocation_rows`) and push allotment changes *back* into the PMS. PMS credentials are passed per-request in the JSON body; when omitted they fall back to the `PMS_USERNAME` / `PMS_PASSWORD` env vars.
+`pipeline/runner.py` orchestrates the automated seven-step workflow:
 
-The `scraper/data/` SQLite DBs (plus scraper debug artifacts like `page_screenshot.png` / `page_source.html`) are working data checked into git, not fixtures — pipeline stages overwrite the DBs (`if_exists='replace'`) on every run.
+PMS scrape → D-EDGE scrape → combine → yield → verify → PMS allotment → D-EDGE BAR.
 
 ### Progress streaming
 
-Long-running scrape/update jobs run in background daemon threads and push status onto a shared queue, consumed by an SSE endpoint:
-- `scraping_progress` (a `queue.Queue` local to `routes/main.py`) feeds `GET /api/scrape/stream`.
-- `log_queue` (`app/shared.py`, a plain module-level `queue.Queue`) feeds `GET /api/update-allotment/stream` and is shared by both allotment-update flows; a `None` sentinel signals stream end.
+Long-running operations run in background threads and use SSE for live logs.
+
+- PMS scraping uses `scraping_progress` in `routes/main.py`.
+- Allotment and BAR operations share `log_queue` from `app/shared.py`.
+- The full pipeline republishes progress through its own `pipeline_queue`.
 
 ## Frontend architecture
 
-Vue Router (`src/router.ts`) maps routes almost 1:1 to pipeline stages: `Scraping`, `Yielder`, `Data`, `Allotment`, plus `Chat`. Pinia (`src/stores/index.ts`) holds a generic `mainStore` (loading/error) and a `chatStore` that persists chat history to `sessionStorage`.
+Vue Router lives in `src/router.ts`. Routed components use the `*View.vue` naming convention:
 
-The shared axios instance (`src/plugins/axios.ts`) has `baseURL: http://127.0.0.1:5666` hardcoded — in dev this is redundant with the Vite proxy but matters for prod builds.
+- `DashboardView.vue`
+- `InventoryCollectionView.vue`
+- `InventoryDataView.vue`
+- `YieldManagementView.vue`
+- `AllotmentManagementView.vue`
+- `BarPricingView.vue`
+- `AutomationPipelineView.vue`
+- `InventoryAssistantView.vue`
 
-`Chat.vue` calls the DeepSeek chat completions API directly from the browser (not proxied through the Flask backend) and feeds it the current combined-inventory data as context.
+The existing public route URLs remain unchanged.
 
-⚠️ `frontend/src/views/Chat.vue` has a live DeepSeek API key hardcoded in the `Authorization` header, shipped to any browser that loads the page and committed to git history. This should be rotated and moved server-side.
+The shared axios instance uses a relative base URL and Vite proxies `/api` to the Flask backend during development.
+
+## Known security concern
+
+`InventoryAssistantView.vue` currently calls DeepSeek directly from the browser and the repository history contains a DeepSeek API key. Rotate that key and move the API call server-side in a separate security-focused change.

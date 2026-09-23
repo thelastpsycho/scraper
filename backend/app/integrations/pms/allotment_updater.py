@@ -11,8 +11,9 @@ import platform
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
-from ..shared import log_queue, allotment_run_control
-from .allocation_store import load_allocation_rows
+from ...shared import log_queue, allotment_run_control
+from ...inventory.allocation_repository import load_allocation_rows
+from ...infrastructure.paths import get_data_dir
 
 def wait_for_toast_disappear(driver, timeout=10):
     """Wait for toast message to disappear"""
@@ -226,7 +227,7 @@ def add_date_range(driver, start_date, end_date):
 def dump_debug_artifacts(driver, name):
     """Save a screenshot + page source so intermittent failures can be diagnosed after the fact"""
     try:
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        data_dir = get_data_dir()
         os.makedirs(data_dir, exist_ok=True)
         driver.save_screenshot(os.path.join(data_dir, f'{name}_screenshot.png'))
         with open(os.path.join(data_dir, f'{name}_page_source.html'), 'w', encoding='utf-8') as f:

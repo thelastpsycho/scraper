@@ -8,7 +8,8 @@ from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException
 import time
 import pandas as pd
-from .process_pms_inventory import process_pms_inventory
+from ...inventory.pms_processor import process_pms_inventory
+from ...infrastructure.paths import get_data_dir
 import os
 import sqlite3
 import platform
@@ -148,9 +149,8 @@ def scrape_pms_inventory(start_date=None, username=None, password=None, headless
     if not username or not password:
         raise Exception("PMS username and password are required")
 
-    # Get the absolute path to the data directory within the scraper folder
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, 'data')
+    # Runtime data location is intentionally preserved for compatibility.
+    data_dir = get_data_dir()
     os.makedirs(data_dir, exist_ok=True)
 
     driver = setup_driver(headless=headless)

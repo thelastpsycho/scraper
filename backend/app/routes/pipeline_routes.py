@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, Response, request, stream_with_context
 import threading
 import json
 
-from .. import pipeline_runner
+from ..pipeline import runner as pipeline_runner
 
 bp = Blueprint('pipeline', __name__)
 

@@ -1,14 +1,14 @@
 from flask import Blueprint, jsonify, Response, request, stream_with_context
-from ..scraper.scraper import scrape_pms_inventory
-from ..scraper.combine_inventory import combine_inventory_files
-from ..scraper.yielder import load_and_clean_data, apply_yield_matrix, apply_custom_yield
-from ..scraper.process_cm_inventory import process_cm_inventory
-from ..scraper.cm_scraper import scrape_cm_inventory
-from ..scraper.update_pms_cm_allotment import update_allotmet
-from ..scraper.update_rest_allotment import update_rest_allotment
-from ..scraper.update_bar import update_bar
+from ..integrations.pms.inventory_scraper import scrape_pms_inventory
+from ..inventory.inventory_combiner import combine_inventory_files
+from ..revenue.yield_engine import load_and_clean_data, apply_yield_matrix, apply_custom_yield
+from ..inventory.channel_manager_processor import process_cm_inventory
+from ..integrations.dedge.inventory_scraper import scrape_cm_inventory
+from ..integrations.pms.allotment_updater import update_allotmet
+from ..integrations.pms.other_room_allotment_updater import update_rest_allotment
+from ..integrations.dedge.bar_updater import update_bar
 from ..shared import log_queue, allotment_run_control
-from .. import pipeline_runner
+from ..pipeline import runner as pipeline_runner
 import queue
 import threading
 import time
@@ -20,6 +20,7 @@ import os
 import json
 import sqlite3
 import pandas as pd
+from ..infrastructure.paths import get_data_dir, get_data_path
 
 bp = Blueprint('main', __name__)
 
@@ -28,7 +29,7 @@ scraping_active = False
 scraping_error = None
 scraping_progress = queue.Queue()
 
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data')
+UPLOAD_FOLDER = get_data_dir()
 ALLOWED_EXTENSIONS = {'xlsx'}
 
 class RealTimeStringIO(StringIO):
@@ -147,8 +148,8 @@ def trigger_combine():
         print("Starting inventory combination process...")
         
         # Check if required files exist
-        pms_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'pms_inventory_processed.db')
-        cm_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'cm_inventory_processed.db')
+        pms_db_path = get_data_path('pms_inventory_processed.db')
+        cm_db_path = get_data_path('cm_inventory_processed.db')
         
         if not os.path.exists(pms_db_path):
             return jsonify({
@@ -167,7 +168,7 @@ def trigger_combine():
         result = combine_inventory_files()
         
         # Verify the combined database was created
-        combined_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'combined_inventory.db')
+        combined_db_path = get_data_path('combined_inventory.db')
         if not os.path.exists(combined_db_path):
             return jsonify({
                 "status": "error",
@@ -209,7 +210,7 @@ def trigger_yield():
         print("Starting yield calculation process...")
         
         # Check if combined inventory exists
-        combined_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'combined_inventory.db')
+        combined_db_path = get_data_path('combined_inventory.db')
         if not os.path.exists(combined_db_path):
             return jsonify({
                 "status": "error",
@@ -217,7 +218,7 @@ def trigger_yield():
             }), 400
 
         # Call the main function which handles the entire process
-        from ..scraper.yielder import main
+        from ..revenue.yield_engine import main
         result = main()
         
         if result is None:
@@ -227,7 +228,7 @@ def trigger_yield():
             }), 500
         
         # Verify the database was created
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'inventory_allocation.db')
+        db_path = get_data_path('inventory_allocation.db')
         if not os.path.exists(db_path):
             return jsonify({
                 "status": "error",
@@ -384,7 +385,7 @@ def trigger_custom_yield():
         bar_level_shift = int(bar_level_shift)
 
         # Check if combined inventory exists
-        combined_db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'scraper', 'data', 'combined_inventory.db')
+        combined_db_path = get_data_path('combined_inventory.db')
         if not os.path.exists(combined_db_path):
             return jsonify({
                 "status": "error",

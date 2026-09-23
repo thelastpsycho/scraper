@@ -22,6 +22,7 @@ import re
 import sqlite3
 
 import openpyxl
+from ..infrastructure.paths import get_data_dir
 
 SHEET_NAME = '7. Rate Strategy'
 LABEL_COL = 5             # column E: 'R. Type' / 'Publish' labels
@@ -36,8 +37,7 @@ ROOM_TYPE_COL_END = 18     # column R (inclusive)
 
 
 def process_bar_rates():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, 'data')
+    data_dir = get_data_dir()
     source_path = os.path.join(data_dir, 'bar_rate_structure.xlsx')
 
     if not os.path.exists(source_path):

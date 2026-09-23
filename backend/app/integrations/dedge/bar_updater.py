@@ -1,8 +1,8 @@
 """Push BAR price levels into the D-EDGE / Availpro extranet.
 
-This is the pricing counterpart to ``update_pms_cm_allotment.py``. Where that
+This is the pricing counterpart to ``allotment_updater.py``. Where that
 flow pushes *allotment* (room counts) into the hospitality PMS, this flow reads
-the yielder's ``inventory_allocation.db`` (table ``daily_inventory_allocation``,
+the yield engine's ``inventory_allocation.db`` (table ``daily_inventory_allocation``,
 columns ``Deluxe BAR Rate`` / ``Premiere BAR Rate`` with values ``BAR2``..``BAR7``)
 and applies the matching price level to the BAR - Best Flexible Rate for the
 Deluxe Room and Premiere Room via the extranet's "Apply a price level" screen.
@@ -40,8 +40,9 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-from ..shared import log_queue
-from .allocation_store import load_allocation_rows
+from ...shared import log_queue
+from ...inventory.allocation_repository import load_allocation_rows
+from ...infrastructure.paths import get_dedge_profile_dir
 
 # --- Site / account configuration -------------------------------------------
 
@@ -58,12 +59,11 @@ ROOM_CONFIG = {
 }
 
 # Persistent Chrome profile so the D-EDGE "trusted device" cookie survives runs.
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_PROFILE_DIR = os.path.join(CURRENT_DIR, ".dedge_profile")
+DEFAULT_PROFILE_DIR = get_dedge_profile_dir()
 
 
 def dedge_price_level(bar_rate, year):
-    """Map a yielder BAR code ('BAR3') to an extranet price-level label ('BAR 3 2026')."""
+    """Map a yield engine BAR code ('BAR3') to an extranet price-level label ('BAR 3 2026')."""
     n = int(str(bar_rate).upper().replace("BAR", "").strip())
     return f"BAR {n} {year}"
 
@@ -387,7 +387,7 @@ def build_level_groups(rows, column):
 def update_bar(driver=None, username=None, password=None,
                rooms=("deluxe", "premiere"), user_data_dir=DEFAULT_PROFILE_DIR,
                dry_run=False, max_levels_per_room=None, headless=None):
-    """Apply yielder BAR levels to the extranet for the given rooms.
+    """Apply yield engine BAR levels to the extranet for the given rooms.
 
     dry_run: build and log every apply plan but stop before clicking the final
              "Apply price level" (safe rehearsal against the live site).

@@ -1,11 +1,11 @@
 import pandas as pd
 import os
 import sqlite3
+from ..infrastructure.paths import get_data_dir
 
 def process_cm_inventory():
     # Get the absolute path to the data directory within the scraper folder
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(current_dir, 'data')
+    data_dir = get_data_dir()
     
     # Use path for the Excel file in data directory
     upload_path = os.path.join(data_dir, 'cm_upload.xlsx')

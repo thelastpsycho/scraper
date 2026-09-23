@@ -11,14 +11,14 @@ import platform
 from datetime import datetime
 import os
 from selenium.webdriver.common.keys import Keys
-from ..shared import log_queue, allotment_run_control
-from .allocation_store import load_allocation_rows
+from ...shared import log_queue, allotment_run_control
+from ...inventory.allocation_repository import load_allocation_rows
 
-# Room types not covered by update_pms_cm_allotment.py (Deluxe Room / Premiere Room).
+# Room types not covered by allotment_updater.py (Deluxe Room / Premiere Room).
 # Each maps to exactly one PMS checkbox value, verified live in the "Add Room" modal
 # at https://fo.hospitality.mykg.id/allotment/detail?companyid=1001. Deluxe Pool Access
 # and Premiere Room Lagoon Access are each a sum of two PMS codes for reading purposes
-# (see process_pms_inventory.py), but - matching the existing Deluxe/Premiere precedent
+# (see pms_processor.py), but - matching the existing Deluxe/Premiere precedent
 # of writing to only one representative code - are written to a single checkbox only
 # (DLTP / PRKL respectively), not both.
 REST_ROOM_TYPE_CONFIG = {
@@ -281,7 +281,7 @@ def build_batches(allocation_rows):
     1. Per room type, collapse consecutive equal-value days into contiguous (start, end, value) runs.
     2. Group runs that share the exact same (start, end, value) across room types -
        these can be checked together in a single Save (this is what fires whenever the
-       Occupancy >= 95 override in yielder.py zeroes all 11 room types on the same days).
+       Occupancy >= 95 override in yield_engine.py zeroes all 11 room types on the same days).
     3. Re-key by (frozenset(room_types), value) so separate date windows sharing the same
        room-type set and value can be packed as multiple ranges in one modal too.
     4. Chunk each group's date ranges into batches of up to MAX_DATE_RANGES_PER_SAVE.
@@ -345,7 +345,7 @@ def update_rest_allotment(driver=None, username=None, password=None, max_dates=N
     """
     Login to the website, select the hotel brand, and push online-inventory allotment
     for all 11 REST_ROOM_TYPE_CONFIG room types (everything except Deluxe/Premiere,
-    which are handled separately by update_pms_cm_allotment.py).
+    which are handled separately by allotment_updater.py).
 
     max_dates: if set, only process the first N dates worth of batches (for testing).
     Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
