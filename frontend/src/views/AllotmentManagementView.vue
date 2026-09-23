@@ -382,7 +382,7 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
       }
     }
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       addLog('Connection error occurred', 'error')
       eventSource.close()
       isUpdating.value = false
@@ -433,7 +433,7 @@ const triggerUpdateRest = async () => {
       }
     }
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       addLog('Connection error occurred', 'error')
       eventSource.close()
       isUpdating.value = false

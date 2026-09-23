@@ -121,3 +121,7 @@ The first CI run caught an existing dependency mismatch: the lockfile installed
 TypeScript 5.8.3 with vue-tsc 1.8.27, which throws before type-checking. Pin
 TypeScript 5.3.3 (compatible with the existing vue-tsc) in both the manifest and
 lockfile so fresh `npm ci` installs are reproducible.
+
+Additional strict-build cleanup: removed unused Vue event-handler parameters,
+an unused duplicate manual CM upload helper and its dead state (the active
+Upload & Process path is unchanged), and unused Inventory Data imports/state.
