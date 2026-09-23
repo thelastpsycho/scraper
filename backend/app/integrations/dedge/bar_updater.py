@@ -42,7 +42,7 @@ from selenium.common.exceptions import TimeoutException
 
 from ...shared import log_queue
 from ...inventory.allocation_repository import load_allocation_rows
-from ...infrastructure.paths import get_dedge_profile_dir
+from ...infrastructure.paths import get_dedge_profile_dir, get_data_dir
 
 # --- Site / account configuration -------------------------------------------
 
@@ -277,6 +277,45 @@ def _add_date_range(driver, start_day, end_day):
     )
 
 
+def _dump_add_button_diagnostics(driver):
+    """On a genuine (non-transient) Add-button timeout, save a screenshot and
+    the outerHTML of every 'Add'-labelled button so the failure can be
+    diagnosed from the artifacts instead of needing to reproduce it live."""
+    try:
+        data_dir = get_data_dir()
+        screenshot_path = os.path.join(data_dir, 'bar_add_button_error.png')
+        driver.save_screenshot(screenshot_path)
+        buttons = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Add']")
+        html_path = os.path.join(data_dir, 'bar_add_button_error.html')
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(f"Matched {len(buttons)} button[aria-label='Add'] element(s)\n\n")
+            for i, btn in enumerate(buttons):
+                f.write(f"--- button {i} ---\n")
+                f.write(f"disabled attr: {btn.get_attribute('disabled')!r}\n")
+                f.write(f"outerHTML: {btn.get_attribute('outerHTML')}\n\n")
+        log(driver, f"Add-button diagnostics saved: {screenshot_path}, {html_path}")
+    except Exception as diag_err:
+        log(driver, f"Failed to save Add-button diagnostics: {diag_err}")
+
+
+def _wait_add_button_enabled(driver, timeout=20):
+    """Wait for the 'Add' button to become enabled, re-finding it once on a
+    timeout. Under a longer chained session (scrape_cm -> allotment -> BAR
+    back to back) the site can be slower to clear the disabled state than a
+    standalone BAR run, and a cached element reference can also go stale if
+    the row re-renders - so retry with a fresh lookup before giving up."""
+    last_err = None
+    for _attempt in range(2):
+        add_btn = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Add']")
+        try:
+            WebDriverWait(driver, timeout).until(lambda d: not add_btn.get_attribute("disabled"))
+            return add_btn
+        except TimeoutException as e:
+            last_err = e
+    _dump_add_button_diagnostics(driver)
+    raise last_err
+
+
 def define_period(driver, ranges, price_level_label):
     """Open the period panel, stack every range, pick the level, and save."""
     _js_click(driver, driver.find_element(
@@ -290,8 +329,7 @@ def define_period(driver, ranges, price_level_label):
         if i < len(ranges) - 1:
             # More ranges to come: commit this row and spawn a fresh empty one.
             # (Never leave a trailing empty row - it disables Save.)
-            add_btn = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Add']")
-            WebDriverWait(driver, 10).until(lambda d: not add_btn.get_attribute("disabled"))
+            add_btn = _wait_add_button_enabled(driver)
             row_count = len(driver.find_elements(By.CSS_SELECTOR, "input[name='From']"))
             _js_click(driver, add_btn)
             WebDriverWait(driver, 10).until(
@@ -348,6 +386,17 @@ def _apply_price_level(driver, timeout=30):
 
 
 # --- Run building -----------------------------------------------------------
+
+# D-EDGE's "Define period and level" panel permanently disables its "Add" button
+# once a period holds this many date-range rows (confirmed live: the 11th row's
+# Add button stayed disabled=true indefinitely - not a load/timing issue). A price
+# level needing more ranges than this must be split across multiple applies.
+MAX_RANGES_PER_APPLY = 10
+
+
+def _chunk_ranges(ranges, size=MAX_RANGES_PER_APPLY):
+    return [ranges[i:i + size] for i in range(0, len(ranges), size)]
+
 
 def build_level_groups(rows, column):
     """Collapse consecutive same-level days into ranges, grouped by price level.
@@ -428,17 +477,25 @@ def update_bar(driver=None, username=None, password=None,
                                    for s, e in ranges)
                 log(driver, f"\n[{cfg['room_label']}] {level_label}  ({len(ranges)} ranges: {pretty})")
 
-                _open_apply_form(driver)
-                define_period(driver, ranges, level_label)
-                _select_only(driver, "Select rates", RATE_LABEL)
-                _select_only(driver, "Select rooms", cfg["room_label"])
+                chunks = _chunk_ranges(ranges)
+                if len(chunks) > 1:
+                    log(driver, f"  {len(ranges)} ranges exceeds the {MAX_RANGES_PER_APPLY}-row D-EDGE limit per apply - "
+                                f"splitting into {len(chunks)} applies")
 
-                if dry_run:
-                    log(driver, "  [dry-run] configured everything, NOT clicking 'Apply price level'")
-                else:
-                    _apply_price_level(driver)
-                    log(driver, f"  Applied {level_label} to {cfg['room_label']} successfully")
-                    total_applied += 1
+                for chunk_idx, chunk in enumerate(chunks, start=1):
+                    if len(chunks) > 1:
+                        log(driver, f"  -- chunk {chunk_idx}/{len(chunks)}: {len(chunk)} ranges --")
+                    _open_apply_form(driver)
+                    define_period(driver, chunk, level_label)
+                    _select_only(driver, "Select rates", RATE_LABEL)
+                    _select_only(driver, "Select rooms", cfg["room_label"])
+
+                    if dry_run:
+                        log(driver, "  [dry-run] configured everything, NOT clicking 'Apply price level'")
+                    else:
+                        _apply_price_level(driver)
+                        log(driver, f"  Applied {level_label} to {cfg['room_label']} successfully")
+                        total_applied += 1
                 processed += 1
 
         log(driver, f"\nDone. {total_applied} price-level applies committed"

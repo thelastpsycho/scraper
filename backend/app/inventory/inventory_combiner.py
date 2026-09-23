@@ -10,7 +10,6 @@ def combine_inventory_files():
         os.makedirs(data_dir, exist_ok=True)
         
         # Print paths for debugging
-        print(f"Current directory: {current_dir}")
         print(f"Data directory: {data_dir}")
         
         # Define database paths

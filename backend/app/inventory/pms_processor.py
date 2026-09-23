@@ -8,7 +8,6 @@ def process_pms_inventory(df=None):
     data_dir = get_data_dir()
     
     # Print the paths for debugging
-    print(f"Current directory: {current_dir}")
     print(f"Data directory: {data_dir}")
     
     os.makedirs(data_dir, exist_ok=True)
