@@ -11,7 +11,11 @@ The extranet screen (https://extranet.availpro.com/Plannings/en/22255/pricinggri
 works in four steps, all rebuilt fresh each time the page is (re)loaded:
 
   1. "Define period and level" - a react-calendar range picker (add one or more
-     date ranges via the "Add" button) plus a native <select> price level.
+     date ranges via the "Add" button) plus a native <select> price level. The
+     select's options are labelled with a year (e.g. "BAR 4 2026"), but that's
+     cosmetic - we match on the BAR number alone and ignore the year, so this
+     keeps working even for dates in a year whose own price levels haven't
+     been created yet (see _select_price_level).
   2. "Select rates"           - checkbox list; we keep only "BAR - Best Flexible Rate".
   3. "Select rooms"           - checkbox list; we keep only the target room.
   4. "Apply price level"      - commits; a "...applied successfully" banner appears.
@@ -28,6 +32,7 @@ date ranges, group those ranges by price level, and do ONE "apply" per level
 """
 
 import os
+import re
 import time
 import platform
 import traceback
@@ -54,14 +59,6 @@ APPLY_URL = f"https://extranet.availpro.com/Plannings/en/{HOTEL_ID}/pricinggrid/
 
 RATE_LABEL = "BAR - Best Flexible Rate"
 
-# Years that actually have a BAR price-level structure created on the D-EDGE
-# extranet. dedge_price_level() builds labels like "BAR 4 2027" from whatever
-# year a date falls in, but selecting one that doesn't exist yet fails loudly
-# (see define_period's NoSuchElementException handling) - so any allocation
-# row outside this set is skipped before it gets that far. Add a year here
-# once its price levels have been created on the extranet.
-DEDGE_CONFIGURED_BAR_YEARS = {2026}
-
 # Which allocation column drives each room, and the exact extranet room label.
 ROOM_CONFIG = {
     "deluxe": {"column": "Deluxe BAR Rate", "room_label": "DELUXE-ROOM - Deluxe Room"},
@@ -72,10 +69,9 @@ ROOM_CONFIG = {
 DEFAULT_PROFILE_DIR = get_dedge_profile_dir()
 
 
-def dedge_price_level(bar_rate, year):
-    """Map a yield engine BAR code ('BAR3') to an extranet price-level label ('BAR 3 2026')."""
-    n = int(str(bar_rate).upper().replace("BAR", "").strip())
-    return f"BAR {n} {year}"
+def bar_number(bar_rate):
+    """Extract the numeric level from a yield engine BAR code ('BAR3' -> 3)."""
+    return int(str(bar_rate).upper().replace("BAR", "").strip())
 
 
 # --- Logging (mirrors update_pms_cm_allotment.log) --------------------------
@@ -333,7 +329,29 @@ def _wait_add_button_enabled(driver, timeout=20):
     raise last_err
 
 
-def define_period(driver, ranges, price_level_label):
+def _select_price_level(driver, level_select, level_number):
+    """Select the dropdown option for this BAR number, ignoring any year suffix
+    in its label (e.g. "BAR 4 2026") - the BAR number is the actual price
+    level; the year is just how D-EDGE happens to name the option, and the
+    operator wants a numbered level applied regardless of which year's label
+    it's currently filed under. Returns the option's actual visible text.
+    """
+    pattern = re.compile(rf"^BAR\s*{level_number}\b", re.IGNORECASE)
+    matches = [o for o in level_select.options if pattern.match(o.text.strip())]
+    if not matches:
+        available = [o.text for o in level_select.options if o.text.strip()]
+        raise RuntimeError(
+            f"No price level 'BAR {level_number}' found on D-EDGE (available: {available})."
+        )
+    if len(matches) > 1:
+        log(driver, f"  Multiple price levels match BAR {level_number} "
+                     f"({[m.text for m in matches]}); using '{matches[0].text}'")
+    chosen = matches[0].text
+    level_select.select_by_visible_text(chosen)
+    return chosen
+
+
+def define_period(driver, ranges, level_number):
     """Open the period panel, stack every range, pick the level, and save."""
     _js_click(driver, driver.find_element(
         By.XPATH, "//button[normalize-space()='Define period and level']"))
@@ -354,21 +372,12 @@ def define_period(driver, ranges, price_level_label):
             )
 
     level_select = Select(driver.find_element(By.CSS_SELECTOR, "select.avp-custom-select"))
-    try:
-        level_select.select_by_visible_text(price_level_label)
-    except NoSuchElementException:
-        available = [o.text for o in level_select.options if o.text.strip()]
-        raise RuntimeError(
-            f"Price level '{price_level_label}' does not exist on D-EDGE yet (available: {available}). "
-            "This usually means next year's price-level structure hasn't been created on the "
-            "extranet yet - create it there, then rerun (already-applied chunks are checkpointed "
-            "and will be skipped)."
-        )
+    chosen_label = _select_price_level(driver, level_select, level_number)
     _click_panel_save(driver)
     # Panel collapses to a summary containing the chosen level.
     WebDriverWait(driver, 15).until(
         EC.presence_of_element_located(
-            (By.XPATH, f"//*[contains(normalize-space(),'{price_level_label}')]"))
+            (By.XPATH, f"//*[contains(normalize-space(),'{chosen_label}')]"))
     )
 
 
@@ -428,9 +437,12 @@ def _chunk_ranges(ranges, size=MAX_RANGES_PER_APPLY):
 def build_level_groups(rows, column):
     """Collapse consecutive same-level days into ranges, grouped by price level.
 
-    Returns a dict keyed by (year, bar_rate) -> list of (start_date, end_date)
-    datetime pairs. Rows must be date-sorted; a gap in the calendar (or a change
-    of bar value) starts a new range.
+    The BAR number is the price level's real identity - D-EDGE option labels
+    happen to carry a year suffix (e.g. "BAR 4 2026") but that's cosmetic, so a
+    run of consecutive same-BAR days is kept as one range even if it crosses a
+    year boundary. Returns a dict keyed by bar_rate -> list of (start_date,
+    end_date) datetime pairs. Rows must be date-sorted; a gap in the calendar
+    (or a change of bar value) starts a new range.
     """
     dated = []
     for row in rows:
@@ -443,7 +455,7 @@ def build_level_groups(rows, column):
     runs = []  # (start, end, bar)
     cur = None
     for day, bar in dated:
-        if cur and bar == cur[2] and day.year == cur[0].year and day == cur[1] + timedelta(days=1):
+        if cur and bar == cur[2] and day == cur[1] + timedelta(days=1):
             cur = (cur[0], day, cur[2])
         else:
             if cur:
@@ -454,7 +466,7 @@ def build_level_groups(rows, column):
 
     groups = {}
     for start, end, bar in runs:
-        groups.setdefault((start.year, bar), []).append((start, end))
+        groups.setdefault(bar, []).append((start, end))
     return groups
 
 
@@ -465,11 +477,11 @@ def _planned_chunks(rows, rooms, max_levels_per_room):
         if room not in ROOM_CONFIG:
             continue
         groups = build_level_groups(rows, ROOM_CONFIG[room]["column"])
-        for idx, ((year, bar_rate), ranges) in enumerate(sorted(groups.items())):
+        for idx, (bar_rate, ranges) in enumerate(sorted(groups.items())):
             if max_levels_per_room and idx >= max_levels_per_room:
                 break
             for chunk in _chunk_ranges(ranges):
-                plan.append(_chunk_identity(room, dedge_price_level(bar_rate, year), chunk))
+                plan.append(_chunk_identity(room, f"BAR {bar_number(bar_rate)}", chunk))
     return plan
 
 
@@ -507,14 +519,6 @@ def update_bar(driver=None, username=None, password=None,
         rows = load_allocation_rows()
         log(driver, f"Loaded {len(rows)} allocation rows from inventory_allocation.db")
 
-        in_scope = [r for r in rows if int(r["Date"][:4]) in DEDGE_CONFIGURED_BAR_YEARS]
-        skipped = len(rows) - len(in_scope)
-        if skipped:
-            skipped_years = sorted({r["Date"][:4] for r in rows if int(r["Date"][:4]) not in DEDGE_CONFIGURED_BAR_YEARS})
-            log(driver, f"Skipping {skipped} row(s) in {', '.join(skipped_years)} - no price-level structure "
-                        f"created on D-EDGE yet for that year (only {sorted(DEDGE_CONFIGURED_BAR_YEARS)} configured)")
-        rows = in_scope
-
         checkpoint = BarCheckpoint(
             _planned_chunks(rows, rooms, max_levels_per_room),
             reset=reset_checkpoint, dry_run=dry_run,
@@ -532,11 +536,12 @@ def update_bar(driver=None, username=None, password=None,
             log(driver, f"\n=== {cfg['room_label']} : {len(groups)} price levels to apply ===")
 
             processed = 0
-            for (year, bar_rate), ranges in sorted(groups.items()):
+            for bar_rate, ranges in sorted(groups.items()):
                 if max_levels_per_room and processed >= max_levels_per_room:
                     log(driver, f"Reached max_levels_per_room={max_levels_per_room}, stopping this room")
                     break
-                level_label = dedge_price_level(bar_rate, year)
+                level_number = bar_number(bar_rate)
+                level_label = f"BAR {level_number}"
                 pretty = ", ".join(f"{s.strftime('%Y-%m-%d')}->{e.strftime('%Y-%m-%d')}"
                                    for s, e in ranges)
                 log(driver, f"\n[{cfg['room_label']}] {level_label}  ({len(ranges)} ranges: {pretty})")
@@ -554,7 +559,7 @@ def update_bar(driver=None, username=None, password=None,
                     if len(chunks) > 1:
                         log(driver, f"  -- chunk {chunk_idx}/{len(chunks)}: {len(chunk)} ranges --")
                     _open_apply_form(driver)
-                    define_period(driver, chunk, level_label)
+                    define_period(driver, chunk, level_number)
                     _select_only(driver, "Select rates", RATE_LABEL)
                     _select_only(driver, "Select rooms", cfg["room_label"])
 
