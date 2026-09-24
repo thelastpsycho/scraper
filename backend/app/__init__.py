@@ -1,15 +1,17 @@
 from flask import Flask
 from flask_cors import CORS
+from .security import init_security
 
 def create_app():
     app = Flask(__name__)
+    init_security(app)
     
     # Configure CORS
     CORS(app, resources={
         r"/api/*": {
             "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://10.201.59.16:5173"],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Accept"],
+            "allow_headers": ["Content-Type", "Authorization", "Accept", "X-CSRF-Token"],
             "supports_credentials": True,
             "expose_headers": ["Content-Type", "Authorization"]
         }
@@ -20,8 +22,10 @@ def create_app():
     from .routes import main
     from .routes import database_routes
     from .routes import pipeline_routes
+    from .routes import auth_routes
     app.register_blueprint(main.bp)
     app.register_blueprint(database_routes.bp)
     app.register_blueprint(pipeline_routes.bp)
+    app.register_blueprint(auth_routes.bp)
     
     return app 

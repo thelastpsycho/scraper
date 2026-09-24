@@ -95,6 +95,11 @@
             </div>
           </div>
 
+          <label v-if="stepEnabled.bar" class="mt-2 inline-flex items-start gap-2 text-xs text-amber-800">
+            <input v-model="resetCheckpoint" type="checkbox" :disabled="isRunning" class="mt-0.5 accent-app-accent" />
+            <span>Start a fresh BAR batch (discard partial-run checkpoint). Check existing D-EDGE changes before selecting.</span>
+          </label>
+
           <button
             @click="startPipeline"
             :disabled="isRunning"
@@ -303,11 +308,12 @@ function toggleStep(id: string) {
 // skipping it entirely.
 const allotmentRooms = ref({ deluxe: true, premiere: true })
 const barRooms = ref({ deluxe: true, premiere: true })
+const resetCheckpoint = ref(false)
 
-const pmsUsername = ref(import.meta.env.VITE_PMS_USERNAME || '')
-const pmsPassword = ref(import.meta.env.VITE_PMS_PASSWORD || '')
-const dedgeUsername = ref(import.meta.env.VITE_DEDGE_USERNAME || '')
-const dedgePassword = ref(import.meta.env.VITE_DEDGE_PASSWORD || '')
+const pmsUsername = ref('')
+const pmsPassword = ref('')
+const dedgeUsername = ref('')
+const dedgePassword = ref('')
 const startDate = ref(new Date().toISOString().split('T')[0])
 const headless = ref(false)
 const configError = ref('')
@@ -433,6 +439,7 @@ async function startPipeline() {
       steps: stepEnabled.value,
       allotmentRoomTypes,
       barRooms: barRoomTypes,
+      resetCheckpoint: resetCheckpoint.value,
     })
   } catch {
     // overallError is already surfaced reactively by the composable

@@ -127,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import axios from '../plugins/axios'
 import * as XLSX from 'xlsx'
 import {
@@ -176,7 +176,6 @@ const activeTab = ref('pms-raw')
 const sortColumn = ref('')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 
-const tooltipMappingsRef = ref<Record<string, string>>({})
 
 // Shared full-name -> short-code abbreviations for room types (Combined + Allocation tabs).
 // The Allocation table's columns are built from yielder.py's output, which renames

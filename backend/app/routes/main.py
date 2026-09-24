@@ -648,6 +648,9 @@ def trigger_update_bar():
         dry_run = bool(data.get('dry_run', False))
         max_levels_per_room = data.get('max_levels_per_room')
         headless = data.get('headless')
+        reset_checkpoint = data.get('resetCheckpoint', False)
+        if not isinstance(reset_checkpoint, bool):
+            return jsonify({'status': 'error', 'message': 'resetCheckpoint must be boolean'}), 400
 
         if isinstance(rooms, str):
             rooms = [rooms]
@@ -674,6 +677,7 @@ def trigger_update_bar():
                     dry_run=dry_run,
                     max_levels_per_room=max_levels_per_room,
                     headless=headless,
+                    reset_checkpoint=reset_checkpoint,
                 )
 
                 if result:

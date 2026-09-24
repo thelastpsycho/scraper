@@ -38,7 +38,9 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
+
+from .bar_checkpoint import BarCheckpoint
 
 from ...shared import log_queue
 from ...inventory.allocation_repository import load_allocation_rows
@@ -304,12 +306,19 @@ def _wait_add_button_enabled(driver, timeout=20):
     back to back) the site can be slower to clear the disabled state than a
     standalone BAR run, and a cached element reference can also go stale if
     the row re-renders - so retry with a fresh lookup before giving up."""
+    def enabled_add_button(d):
+        try:
+            button = d.find_element(By.CSS_SELECTOR, "button[aria-label='Add']")
+            if button.is_enabled() and not button.get_attribute("disabled"):
+                return button
+        except (StaleElementReferenceException, NoSuchElementException):
+            pass
+        return False
+
     last_err = None
     for _attempt in range(2):
-        add_btn = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Add']")
         try:
-            WebDriverWait(driver, timeout).until(lambda d: not add_btn.get_attribute("disabled"))
-            return add_btn
+            return WebDriverWait(driver, timeout).until(enabled_add_button)
         except TimeoutException as e:
             last_err = e
     _dump_add_button_diagnostics(driver)
@@ -395,6 +404,8 @@ MAX_RANGES_PER_APPLY = 10
 
 
 def _chunk_ranges(ranges, size=MAX_RANGES_PER_APPLY):
+    if size < 1:
+        raise ValueError("Chunk size must be positive")
     return [ranges[i:i + size] for i in range(0, len(ranges), size)]
 
 
@@ -416,7 +427,7 @@ def build_level_groups(rows, column):
     runs = []  # (start, end, bar)
     cur = None
     for day, bar in dated:
-        if cur and bar == cur[2] and day == cur[1] + timedelta(days=1):
+        if cur and bar == cur[2] and day.year == cur[0].year and day == cur[1] + timedelta(days=1):
             cur = (cur[0], day, cur[2])
         else:
             if cur:
@@ -431,16 +442,38 @@ def build_level_groups(rows, column):
     return groups
 
 
+def _planned_chunks(rows, rooms, max_levels_per_room):
+    """Canonical fingerprint input for safe resumption after partial failures."""
+    plan = []
+    for room in rooms:
+        if room not in ROOM_CONFIG:
+            continue
+        groups = build_level_groups(rows, ROOM_CONFIG[room]["column"])
+        for idx, ((year, bar_rate), ranges) in enumerate(sorted(groups.items())):
+            if max_levels_per_room and idx >= max_levels_per_room:
+                break
+            for chunk in _chunk_ranges(ranges):
+                plan.append(_chunk_identity(room, dedge_price_level(bar_rate, year), chunk))
+    return plan
+
+
+def _chunk_identity(room, level_label, chunk):
+    return [room, level_label, [[start.isoformat(), end.isoformat()] for start, end in chunk]]
+
+
 # --- Main entry point -------------------------------------------------------
 
 def update_bar(driver=None, username=None, password=None,
                rooms=("deluxe", "premiere"), user_data_dir=DEFAULT_PROFILE_DIR,
-               dry_run=False, max_levels_per_room=None, headless=None):
+               dry_run=False, max_levels_per_room=None, headless=None,
+               reset_checkpoint=False):
     """Apply yield engine BAR levels to the extranet for the given rooms.
 
     dry_run: build and log every apply plan but stop before clicking the final
              "Apply price level" (safe rehearsal against the live site).
-    max_levels_per_room: cap the number of price-level applies per room (testing).
+    max_levels_per_room: cap the number of price-level groups per room (testing).
+    reset_checkpoint: explicitly discard a checkpoint if starting a new run
+                      after a partial failure or after intentional external edits.
     headless: run Chrome headless (None -> honour the SELENIUM_HEADLESS env var).
               Only use headless once the profile's device is trusted.
     Credentials fall back to the DEDGE_USERNAME / DEDGE_PASSWORD env vars.
@@ -457,6 +490,12 @@ def update_bar(driver=None, username=None, password=None,
 
         rows = load_allocation_rows()
         log(driver, f"Loaded {len(rows)} allocation rows from inventory_allocation.db")
+        checkpoint = BarCheckpoint(
+            _planned_chunks(rows, rooms, max_levels_per_room),
+            reset=reset_checkpoint, dry_run=dry_run,
+        )
+        if checkpoint.resumed:
+            log(driver, f"Resuming BAR run: {len(checkpoint.completed)} previously confirmed chunk(s) will be skipped")
 
         total_applied = 0
         for room_key in rooms:
@@ -483,6 +522,10 @@ def update_bar(driver=None, username=None, password=None,
                                 f"splitting into {len(chunks)} applies")
 
                 for chunk_idx, chunk in enumerate(chunks, start=1):
+                    chunk_id = _chunk_identity(room_key, level_label, chunk)
+                    if checkpoint.contains(chunk_id):
+                        log(driver, f"  Already applied chunk {chunk_idx}/{len(chunks)} in the previous run; skipping")
+                        continue
                     if len(chunks) > 1:
                         log(driver, f"  -- chunk {chunk_idx}/{len(chunks)}: {len(chunk)} ranges --")
                     _open_apply_form(driver)
@@ -494,10 +537,13 @@ def update_bar(driver=None, username=None, password=None,
                         log(driver, "  [dry-run] configured everything, NOT clicking 'Apply price level'")
                     else:
                         _apply_price_level(driver)
+                        checkpoint.mark(chunk_id)
                         log(driver, f"  Applied {level_label} to {cfg['room_label']} successfully")
                         total_applied += 1
                 processed += 1
 
+        if not dry_run:
+            checkpoint.finish()
         log(driver, f"\nDone. {total_applied} price-level applies committed"
                     f"{' (dry-run: 0 committed)' if dry_run else ''}.")
         return True

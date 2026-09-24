@@ -14,7 +14,7 @@ A hotel inventory and revenue-automation tool. Selenium collects inventory from 
 Backend (from `backend/`):
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python run.py
 ```
 
@@ -27,15 +27,16 @@ npm run build
 npm run preview
 ```
 
-There is currently no automated test suite or lint script configured.
+Backend tests live in `backend/tests/` (`PYTHONPATH=backend pytest -q backend/tests` from the repository root). `.github/workflows/verify.yml` runs Python tests and `npm run build` on PRs.
 
 ## Backend architecture
 
-`backend/app/__init__.py` is the Flask app factory and registers three blueprints:
+`backend/app/__init__.py` is the Flask app factory and registers four blueprints:
 
 - `routes/main.py` — individual scrape/process/yield/allotment/BAR actions and SSE progress streams
 - `routes/database_routes.py` — read-only SQLite data endpoints
 - `routes/pipeline_routes.py` — end-to-end pipeline control and SSE progress stream
+- `routes/auth_routes.py` — operator session authentication and CSRF token issuance
 
 Source code is organized by responsibility:
 
@@ -97,6 +98,8 @@ The existing public route URLs remain unchanged.
 
 The shared axios instance uses a relative base URL and Vite proxies `/api` to the Flask backend during development.
 
-## Known security concern
+## Security
 
-The DeepSeek-backed chat/assistant page (`InventoryAssistantView.vue`) was removed because it called DeepSeek directly from the browser with a hardcoded API key. That key is still in repository history and must be rotated/revoked - removing the source file does not do that.
+`APP_ACCESS_TOKEN` and `APP_SESSION_SECRET` must be configured on the backend before authenticated API endpoints become available. The UI is gated by `AuthGate.vue` and the axios client attaches CSRF tokens on writes. Never introduce provider credentials via `VITE_*` frontend variables. BAR partial-run recovery is implemented in `integrations/dedge/bar_checkpoint.py`.
+
+The DeepSeek-backed chat/assistant page (`InventoryAssistantView.vue`) and its `routes/assistant_routes.py` server-side proxy were removed - the feature called DeepSeek with a hardcoded API key. Both the DeepSeek key and the D-EDGE password were previously embedded in public frontend history: rotate/revoke them immediately; see `SECURITY.md`. Removing the source file does not do that.

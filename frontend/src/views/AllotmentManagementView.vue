@@ -132,6 +132,11 @@
             </label>
           </div>
 
+          <label class="mt-3 inline-flex items-start gap-2 text-xs text-amber-800">
+            <input v-model="resetBarCheckpoint" type="checkbox" :disabled="isUpdating" class="mt-0.5 accent-app-accent" />
+            <span>Start fresh (discard partial BAR checkpoint). Verify existing D-EDGE changes before selecting.</span>
+          </label>
+
           <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <button
               @click="triggerBarUpdate(['deluxe'])"
@@ -290,15 +295,16 @@ const progressBarColor = computed(() => {
 })
 const activeFlow = ref<'allotment' | 'bar' | null>(null)
 const isPaused = ref(false)
-const username = ref(import.meta.env.VITE_PMS_USERNAME || '')
-const password = ref(import.meta.env.VITE_PMS_PASSWORD || '')
+const username = ref('')
+const password = ref('')
 const maxDates = ref<number | null>(null)
 const headless = ref(false)
 // TODO: prefilled for convenience — move server-side before shipping (ships to
 // the browser and is committed to git).
-const dedgeUsername = ref('ecommerce@theanvayabali.com')
-const dedgePassword = ref('Makingbelieves321`')
+const dedgeUsername = ref('')
+const dedgePassword = ref('')
 const barDryRun = ref(false)
+const resetBarCheckpoint = ref(false)
 const logs = ref<Array<{message: string, type: 'info' | 'success' | 'error', timestamp: Date}>>([])
 const logContainer = ref<HTMLElement | null>(null)
 
@@ -376,7 +382,7 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
       }
     }
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       addLog('Connection error occurred', 'error')
       eventSource.close()
       isUpdating.value = false
@@ -427,7 +433,7 @@ const triggerUpdateRest = async () => {
       }
     }
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       addLog('Connection error occurred', 'error')
       eventSource.close()
       isUpdating.value = false
@@ -491,6 +497,7 @@ const triggerBarUpdate = async (rooms: Array<'deluxe' | 'premiere'>) => {
       password: dedgePassword.value || null,
       rooms,
       dry_run: barDryRun.value,
+      resetCheckpoint: resetBarCheckpoint.value,
       headless: headless.value
     })
 

@@ -53,6 +53,7 @@ def start_pipeline():
         "steps": data.get("steps"),
         "allotmentRoomTypes": data.get("allotmentRoomTypes"),
         "barRooms": data.get("barRooms"),
+        "resetCheckpoint": data.get("resetCheckpoint") is True,
     }
     thread = threading.Thread(target=pipeline_runner.run_pipeline, args=(config,))
     thread.daemon = True

@@ -289,8 +289,8 @@ let eventSource: EventSource | null = null
 const loadingCombine = ref(false)
 const loadingYield = ref(false)
 const loadingProcessCM = ref(false)
-const dedgeUsername = ref(import.meta.env.VITE_DEDGE_USERNAME || '')
-const dedgePassword = ref(import.meta.env.VITE_DEDGE_PASSWORD || '')
+const dedgeUsername = ref('')
+const dedgePassword = ref('')
 const isScrapingCM = ref(false)
 const cmLogs = ref<Array<{ message: string; type: 'info' | 'success' | 'error' }>>([])
 const cmLogContainer = ref<HTMLElement | null>(null)
@@ -308,14 +308,11 @@ watch(
 const message = ref('')
 const messageType = ref<'success' | 'error'>('success')
 const startDate = ref(new Date().toISOString().split('T')[0]) // Initialize with today's date
-const username = ref(import.meta.env.VITE_PMS_USERNAME || '')
-const password = ref(import.meta.env.VITE_PMS_PASSWORD || '')
+const username = ref('')
+const password = ref('')
 
 const selectedFile = ref<File|null>(null)
 const uploading = ref(false)
-const uploadStatus = ref('')
-const uploadStatusType = ref<'success'|'error'>('success')
-const cmUploaded = ref(false)
 
 // Modal state
 const showModal = ref(false)
@@ -439,31 +436,6 @@ function onFileChange(e: Event) {
   const files = (e.target as HTMLInputElement).files
   if (files && files.length > 0) {
     selectedFile.value = files[0]
-    uploadStatus.value = ''
-    cmUploaded.value = false
-  }
-}
-
-async function uploadFile() {
-  if (!selectedFile.value) return
-  uploading.value = true
-  uploadStatus.value = ''
-  cmUploaded.value = false
-  try {
-    const formData = new FormData()
-    formData.append('file', selectedFile.value)
-    const res = await axios.post('/api/upload-cm-excel', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-    uploadStatus.value = res.data.message || 'File uploaded successfully.'
-    uploadStatusType.value = 'success'
-    cmUploaded.value = true
-  } catch (err: any) {
-    uploadStatus.value = err?.response?.data?.message || 'Failed to upload file.'
-    uploadStatusType.value = 'error'
-    cmUploaded.value = false
-  } finally {
-    uploading.value = false
   }
 }
 
