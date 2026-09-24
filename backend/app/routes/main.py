@@ -87,10 +87,9 @@ def trigger_scrape():
     if not start_date:
         return jsonify({"status": "error", "message": "Start date is required"}), 400
 
+    # Falls back to PMS_USERNAME / PMS_PASSWORD env vars inside scrape_pms_inventory when omitted.
     username = request.json.get('username')
     password = request.json.get('password')
-    if not username or not password:
-        return jsonify({"status": "error", "message": "PMS username and password are required"}), 400
 
     # Reset error state
     scraping_error = None
@@ -475,12 +474,7 @@ def trigger_update_allotment():
         room_type = data.get('room_type', 'deluxe')
         max_dates = data.get('max_dates')
         headless = data.get('headless')
-
-        if not username or not password:
-            return jsonify({
-                'status': 'error',
-                'message': 'Username and password are required'
-            }), 400
+        # Falls back to PMS_USERNAME / PMS_PASSWORD env vars inside update_allotmet when omitted.
 
         if room_type not in ('deluxe', 'premiere'):
             return jsonify({
@@ -560,16 +554,11 @@ def trigger_update_rest_allotment():
         return jsonify({"status": "error", "message": "A pipeline run is currently in progress; please wait for it to finish."}), 409
     try:
         data = request.get_json()
+        # Falls back to PMS_USERNAME / PMS_PASSWORD env vars inside update_rest_allotment when omitted.
         username = data.get('username')
         password = data.get('password')
         max_dates = data.get('max_dates')
         headless = data.get('headless')
-
-        if not username or not password:
-            return jsonify({
-                'status': 'error',
-                'message': 'Username and password are required'
-            }), 400
 
         # Start update process in a separate thread
         def update_process():

@@ -321,11 +321,7 @@ const modalStatus = ref('')
 const modalStatusType = ref<'success'|'error'>('success')
 
 const startScraping = async () => {
-  if (!username.value || !password.value) {
-    error.value = 'Please enter your PMS username and password.'
-    return
-  }
-
+  // Blank username/password falls back to PMS_USERNAME / PMS_PASSWORD on the backend.
   isScraping.value = true
   error.value = ''
   success.value = ''

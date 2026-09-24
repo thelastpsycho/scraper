@@ -25,7 +25,10 @@ def pipeline_status():
 @bp.route('/api/pipeline/start', methods=['POST'])
 def start_pipeline():
     data = request.get_json(silent=True) or {}
-    required = ['pmsUsername', 'pmsPassword', 'dedgeUsername', 'dedgePassword', 'startDate', 'yieldConfig']
+    # pmsUsername/pmsPassword/dedgeUsername/dedgePassword are optional here - each
+    # falls back to the PMS_USERNAME/PMS_PASSWORD/DEDGE_USERNAME/DEDGE_PASSWORD env
+    # vars inside the underlying scrape/allotment/BAR functions when omitted.
+    required = ['startDate', 'yieldConfig']
     missing = [k for k in required if not data.get(k)]
     if missing:
         return jsonify({"status": "error", "message": f"Missing required field(s): {', '.join(missing)}"}), 400
@@ -41,10 +44,10 @@ def start_pipeline():
             break
 
     config = {
-        "pmsUsername": data["pmsUsername"],
-        "pmsPassword": data["pmsPassword"],
-        "dedgeUsername": data["dedgeUsername"],
-        "dedgePassword": data["dedgePassword"],
+        "pmsUsername": data.get("pmsUsername"),
+        "pmsPassword": data.get("pmsPassword"),
+        "dedgeUsername": data.get("dedgeUsername"),
+        "dedgePassword": data.get("dedgePassword"),
         "startDate": data["startDate"],
         "headless": data.get("headless"),
         "yieldConfig": data["yieldConfig"],
