@@ -54,6 +54,14 @@ APPLY_URL = f"https://extranet.availpro.com/Plannings/en/{HOTEL_ID}/pricinggrid/
 
 RATE_LABEL = "BAR - Best Flexible Rate"
 
+# Years that actually have a BAR price-level structure created on the D-EDGE
+# extranet. dedge_price_level() builds labels like "BAR 4 2027" from whatever
+# year a date falls in, but selecting one that doesn't exist yet fails loudly
+# (see define_period's NoSuchElementException handling) - so any allocation
+# row outside this set is skipped before it gets that far. Add a year here
+# once its price levels have been created on the extranet.
+DEDGE_CONFIGURED_BAR_YEARS = {2026}
+
 # Which allocation column drives each room, and the exact extranet room label.
 ROOM_CONFIG = {
     "deluxe": {"column": "Deluxe BAR Rate", "room_label": "DELUXE-ROOM - Deluxe Room"},
@@ -498,6 +506,15 @@ def update_bar(driver=None, username=None, password=None,
 
         rows = load_allocation_rows()
         log(driver, f"Loaded {len(rows)} allocation rows from inventory_allocation.db")
+
+        in_scope = [r for r in rows if int(r["Date"][:4]) in DEDGE_CONFIGURED_BAR_YEARS]
+        skipped = len(rows) - len(in_scope)
+        if skipped:
+            skipped_years = sorted({r["Date"][:4] for r in rows if int(r["Date"][:4]) not in DEDGE_CONFIGURED_BAR_YEARS})
+            log(driver, f"Skipping {skipped} row(s) in {', '.join(skipped_years)} - no price-level structure "
+                        f"created on D-EDGE yet for that year (only {sorted(DEDGE_CONFIGURED_BAR_YEARS)} configured)")
+        rows = in_scope
+
         checkpoint = BarCheckpoint(
             _planned_chunks(rows, rooms, max_levels_per_room),
             reset=reset_checkpoint, dry_run=dry_run,
