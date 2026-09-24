@@ -345,9 +345,17 @@ def define_period(driver, ranges, price_level_label):
                 lambda d: len(d.find_elements(By.CSS_SELECTOR, "input[name='From']")) > row_count
             )
 
-    Select(driver.find_element(By.CSS_SELECTOR, "select.avp-custom-select")).select_by_visible_text(
-        price_level_label
-    )
+    level_select = Select(driver.find_element(By.CSS_SELECTOR, "select.avp-custom-select"))
+    try:
+        level_select.select_by_visible_text(price_level_label)
+    except NoSuchElementException:
+        available = [o.text for o in level_select.options if o.text.strip()]
+        raise RuntimeError(
+            f"Price level '{price_level_label}' does not exist on D-EDGE yet (available: {available}). "
+            "This usually means next year's price-level structure hasn't been created on the "
+            "extranet yet - create it there, then rerun (already-applied chunks are checkpointed "
+            "and will be skipped)."
+        )
     _click_panel_save(driver)
     # Panel collapses to a summary containing the chosen level.
     WebDriverWait(driver, 15).until(
