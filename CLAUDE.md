@@ -49,11 +49,11 @@ Source code is organized by responsibility:
 
 ### Runtime data
 
-For backward compatibility, runtime data intentionally remains in:
+For backward compatibility, runtime data remains in:
 
 `backend/app/scraper/data/`
 
-The source-code refactor does **not** move existing SQLite databases, uploads, screenshots, or HTML debug artifacts. The persistent D-EDGE Chrome profile also remains at:
+The source-code refactor does **not** move existing SQLite databases, uploads, screenshots, or HTML debug artifacts. As of 2026-09-26 this directory is tracked in git (previously gitignored) so pipeline runs' output - including `allocation_policy.json` if one is added - is committed as part of normal history rather than staying local-only; each pipeline run will show as working-tree changes here until committed. The persistent D-EDGE Chrome profile remains gitignored at:
 
 `backend/app/scraper/.dedge_profile/`
 

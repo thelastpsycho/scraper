@@ -52,7 +52,7 @@ Occupancy outside the configured demand bins is rejected rather than silently sk
 
 All yield entry points load the same JSON policy at runtime:
 
-- Default: `backend/app/scraper/data/allocation_policy.json` (local, gitignored).
+- Default: `backend/app/scraper/data/allocation_policy.json` (tracked in git as of 2026-09-26, same as the rest of `backend/app/scraper/data/`).
 - Alternative: set `ALLOCATION_POLICY_PATH` to a JSON file.
 - If absent, defaults follow the hotel tier order, trying the nearest eligible higher category first:
   Deluxe → Deluxe Pool Access → Premiere → Premiere Lagoon Access → Family Premiere →
