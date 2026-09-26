@@ -1,27 +1,30 @@
 """Single-operator session auth for every API endpoint.
 
-APP_ACCESS_TOKEN and APP_SESSION_SECRET must be configured before the API
+APP_ACCESS_PIN and APP_SESSION_SECRET must be configured before the API
 becomes available. Optional insecure development is restricted to an explicit
 opt-in on a loopback-bound Flask server.
 """
 import hmac
 import os
+import re
 import secrets
 from datetime import timedelta
 
 from flask import jsonify, request, session
 
+_PIN_RE = re.compile(r"^\d{6}$")
+
 
 def init_security(app):
-    access_token = os.environ.get("APP_ACCESS_TOKEN", "")
+    access_pin = os.environ.get("APP_ACCESS_PIN", "")
     session_secret = os.environ.get("APP_SESSION_SECRET", "")
     dev_flag = os.environ.get("ALLOW_INSECURE_LOCAL_DEV") == "1"
     host = os.environ.get("APP_HOST", "127.0.0.1")
-    dev_mode = dev_flag and host in ("127.0.0.1", "localhost", "::1") and not access_token
-    configured = (len(access_token) >= 32 and len(session_secret) >= 32 and
-                  not access_token.startswith("replace-") and not session_secret.startswith("replace-"))
-    if (access_token or session_secret) and not configured:
-        raise RuntimeError("Set independent random APP_ACCESS_TOKEN and APP_SESSION_SECRET (32+ characters each); example values are invalid")
+    dev_mode = dev_flag and host in ("127.0.0.1", "localhost", "::1") and not access_pin
+    configured = (bool(_PIN_RE.match(access_pin)) and len(session_secret) >= 32 and
+                  not session_secret.startswith("replace-"))
+    if (access_pin or session_secret) and not configured:
+        raise RuntimeError("Set APP_ACCESS_PIN to exactly 6 digits and APP_SESSION_SECRET to a random 32+ character secret; example values are invalid")
 
     # When unconfigured, the API is locked (not openly accessible). Health and
     # auth/status remain available to report the missing configuration.
@@ -36,7 +39,7 @@ def init_security(app):
     app.extensions["operator_auth"] = {
         "configured": configured,
         "dev_mode": dev_mode,
-        "token": access_token,
+        "pin": access_pin,
     }
 
     @app.before_request
@@ -49,7 +52,7 @@ def init_security(app):
         if auth["dev_mode"]:
             return None
         if not auth["configured"]:
-            return jsonify({"status": "error", "message": "API access is not configured; set APP_ACCESS_TOKEN and APP_SESSION_SECRET"}), 503
+            return jsonify({"status": "error", "message": "API access is not configured; set APP_ACCESS_PIN and APP_SESSION_SECRET"}), 503
         if not session.get("authenticated"):
             return jsonify({"status": "error", "message": "Authentication required"}), 401
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):

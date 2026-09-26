@@ -7,12 +7,12 @@ The seven-step pipeline supports per-stage selection and an SSE progress log.
 ## Setup
 
 1. `pip install -r backend/requirements-dev.txt`
-2. Copy `backend/.env.example` to `backend/.env`; configure distinct random
-   `APP_ACCESS_TOKEN` and `APP_SESSION_SECRET` values (32+ characters), plus
+2. Copy `backend/.env.example` to `backend/.env`; set your own 6-digit
+   `APP_ACCESS_PIN` and a random 32+ character `APP_SESSION_SECRET`, plus
    provider credentials as needed. See `SECURITY.md`.
 3. `cd backend && python run.py` (defaults to `127.0.0.1:5666`).
 4. `cd frontend && npm ci && npm run dev`; Vite proxies `/api`.
-5. Open the app and sign in using `APP_ACCESS_TOKEN`.
+5. Open the app and sign in using your `APP_ACCESS_PIN`.
 
 Existing SQLite databases, uploads, diagnostic artifacts, and the D-EDGE
 persistent browser profile remain under `backend/app/scraper/` and are

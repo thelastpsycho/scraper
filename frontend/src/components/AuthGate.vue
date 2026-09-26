@@ -6,14 +6,15 @@
     <form class="w-full max-w-sm space-y-5 rounded-2xl bg-white p-7 shadow-xl" @submit.prevent="login">
       <h1 class="text-xl font-semibold text-slate-900">Revenue Console</h1>
       <p v-if="!configured" class="text-sm text-amber-800" role="alert">
-        API authentication is not configured. Set APP_ACCESS_TOKEN and APP_SESSION_SECRET on the backend.
+        API authentication is not configured. Set APP_ACCESS_PIN and APP_SESSION_SECRET on the backend.
       </p>
       <template v-else>
-        <label for="access-token" class="block text-sm font-medium text-slate-700">Operator access token</label>
-        <input id="access-token" v-model="token" type="password" required autocomplete="off"
-          class="w-full rounded-lg border border-slate-300 px-3 py-2" />
+        <label for="access-pin" class="block text-sm font-medium text-slate-700">6-digit PIN</label>
+        <input id="access-pin" v-model="pin" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6"
+          autocomplete="off" required
+          class="w-full rounded-lg border border-slate-300 px-3 py-2 tracking-widest" />
         <p v-if="error" class="text-sm text-red-700" role="alert">{{ error }}</p>
-        <button type="submit" :disabled="!token || submitting"
+        <button type="submit" :disabled="pin.length !== 6 || submitting"
           class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-50">
           {{ submitting ? 'Signing in…' : 'Sign in' }}
         </button>
@@ -31,7 +32,7 @@ const loading = ref(true)
 const submitting = ref(false)
 const configured = ref(false)
 const authenticated = ref(false)
-const token = ref('')
+const pin = ref('')
 const error = ref('')
 
 function expireSession() {
@@ -57,16 +58,16 @@ async function refresh() {
 }
 
 async function login() {
-  if (!token.value || submitting.value) return
+  if (pin.value.length !== 6 || submitting.value) return
   submitting.value = true
   error.value = ''
   try {
-    const { data } = await axios.post('/api/auth/login', { token: token.value })
+    const { data } = await axios.post('/api/auth/login', { pin: pin.value })
     setCsrfToken(data.csrf_token)
     authenticated.value = true
-    token.value = ''
+    pin.value = ''
   } catch {
-    error.value = 'Could not sign in. Check your access token and backend configuration.'
+    error.value = 'Could not sign in. Check your PIN and backend configuration.'
   } finally {
     submitting.value = false
   }

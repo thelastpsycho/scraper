@@ -20,7 +20,7 @@ def status():
     if conf["configured"] and authenticated:
         result["csrf_token"] = session.get("csrf_token") or new_csrf()
     if not conf["configured"] and not conf["dev_mode"]:
-        result["message"] = "Set APP_ACCESS_TOKEN and APP_SESSION_SECRET on the Flask backend"
+        result["message"] = "Set APP_ACCESS_PIN and APP_SESSION_SECRET on the Flask backend"
     return jsonify(result)
 
 
@@ -29,9 +29,9 @@ def login():
     conf = current_app.extensions["operator_auth"]
     if not conf["configured"]:
         return jsonify({"status": "error", "message": "API authentication is not configured"}), 503
-    supplied = (request.get_json(silent=True) or {}).get("token", "")
-    if not isinstance(supplied, str) or not hmac.compare_digest(supplied, conf["token"]):
-        return jsonify({"status": "error", "message": "Invalid access token"}), 401
+    supplied = (request.get_json(silent=True) or {}).get("pin", "")
+    if not isinstance(supplied, str) or not hmac.compare_digest(supplied, conf["pin"]):
+        return jsonify({"status": "error", "message": "Invalid PIN"}), 401
     session.clear()
     session.permanent = True
     session["authenticated"] = True

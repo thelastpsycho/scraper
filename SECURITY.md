@@ -10,18 +10,24 @@ previous deployments, and logs. Do not commit the replacements.
 
 ## Operator authentication
 
-Copy `backend/.env.example` to `backend/.env`, then generate two independent,
-random 32+-character strings:
+Copy `backend/.env.example` to `backend/.env`. Set `APP_ACCESS_PIN` to your
+own 6-digit PIN for operator login, and generate an independent, random
+32+-character `APP_SESSION_SECRET` for Flask session signing:
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Set `APP_ACCESS_TOKEN` for operator login and a *different*
-`APP_SESSION_SECRET` for Flask session signing. Optional
+`APP_ACCESS_PIN` and `APP_SESSION_SECRET` must be different values. Optional
 `PMS_USERNAME`, `PMS_PASSWORD`, `DEDGE_USERNAME`, and `DEDGE_PASSWORD`
 can also reside on the backend. Never use frontend `VITE_*` variables for
 provider credentials: Vite embeds them into browser JavaScript.
+
+A 6-digit PIN has only 1,000,000 possible values, far fewer than the
+previous long access token. There is no lockout on failed login attempts,
+so the PIN must be paired with the network restrictions below (loopback
+binding, reverse-proxy rate limiting, or a firewall) rather than relied on
+as the sole defense.
 
 Backend API operations are locked if authentication is unconfigured. The
 browser uses an HttpOnly, SameSite=Strict session cookie plus an in-memory
