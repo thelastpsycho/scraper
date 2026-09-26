@@ -137,6 +137,14 @@
         </div>
       </div>
 
+      <div class="flex-shrink-0 border-b border-slate-200 px-6 py-3">
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input v-model="includeOtherRooms" type="checkbox">
+          Calculate allocations for all room categories
+        </label>
+        <p class="mt-1 text-xs text-slate-500">Reserves cover unassigned upgrades. Room assignments already reflected in the PMS are not deducted again. Publishing remains a separate action.</p>
+      </div>
+
       <!-- Status/Error Message -->
       <div v-if="error" class="flex-shrink-0 p-4 sm:px-6">
         <div class="flex items-start gap-2 rounded-xl bg-app-primary p-3 text-sm font-semibold text-rose-700 shadow-neu-inset-sm">
@@ -152,6 +160,12 @@
             <div>
               <h3 class="text-base font-semibold text-app-tertiary">Inventory allocation</h3>
               <p class="text-sm text-slate-500">Results from the yield calculation.</p>
+              <p v-if="blockedDays" class="mt-1 text-sm font-semibold text-rose-700">{{ blockedDays }} date(s) have uncovered upgrades. Proposed online inventory is zero on those dates; review upgrade routes and capacity.</p>
+              <label class="mt-2 block text-sm text-slate-600">Show category
+                <select v-model="selectedRoom" class="neu-input mt-1">
+                  <option v-for="room in roomTypes" :key="room" :value="room">{{ room }}</option>
+                </select>
+              </label>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-xs font-medium text-slate-400">Export</span>
@@ -206,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, shallowRef } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import axios from '../plugins/axios'
 import * as XLSX from 'xlsx'
 import {
@@ -219,8 +233,6 @@ import {
   CodeBracketIcon,
   DocumentMagnifyingGlassIcon,
   CalendarDaysIcon,
-  SparklesIcon,
-  SunIcon,
   ChartPieIcon,
   SignalIcon,
   BuildingOfficeIcon,
@@ -235,6 +247,8 @@ const isLoading = ref(false)
 const error = ref<string | null>(null)
 const allocationData = ref<any[]>([])
 const showCustomConfig = ref(false)
+const includeOtherRooms = ref(false)
+const selectedRoom = ref('Premiere Room')
 
 interface CustomConfig {
   demand_bins: number[] | string;
@@ -268,19 +282,33 @@ const defaultConfig: CustomConfig = {
 
 const customConfig = ref<CustomConfig>({ ...defaultConfig })
 
-const tableHeaders = shallowRef([
-  { key: 'Date', label: 'Date', icon: CalendarDaysIcon },
-  { key: 'DayOfWeek', label: 'Day', icon: SparklesIcon },
-  { key: 'Season', label: 'Season', icon: SunIcon },
-  { key: 'Occupancy', label: 'Occupancy', icon: ChartPieIcon },
-  { key: 'DemandLevel', label: 'Demand', icon: SignalIcon },
-  { key: 'Deluxe Remaining Inventory', label: 'Deluxe Avail', icon: BuildingOfficeIcon },
-  { key: 'Deluxe Online Inventory', label: 'Deluxe Online', icon: BuildingStorefrontIcon },
-  { key: 'Deluxe BAR Rate', label: 'Deluxe BAR', icon: BanknotesIcon },
-  { key: 'Premiere Remaining Inventory', label: 'Premiere Avail', icon: BuildingOfficeIcon },
-  { key: 'Premiere Online Inventory', label: 'Premiere Online', icon: BuildingStorefrontIcon },
-  { key: 'Premiere BAR Rate', label: 'Premiere BAR', icon: BanknotesIcon },
-])
+const roomTypes = [
+  'Deluxe Room', 'Premiere Room', 'Deluxe Pool Access', 'Premiere Room Lagoon Access',
+  'Premiere Suite Room', 'Deluxe Suite Room', 'Family Premiere Room',
+  'Beach Front Private Suite Room', 'The Anvaya Suite Whirpool',
+  'The Anvaya Suite No Pool', 'The Anvaya Suite With Pool', 'The Anvaya Residence', 'The Anvaya Villa'
+]
+const blockedDays = computed(() => allocationData.value.filter(row => row['Unresolved Upgrade Rooms'] > 0).length)
+const tableHeaders = computed(() => {
+  const room = selectedRoom.value
+  const prefix = room === 'Deluxe Room' ? 'Deluxe' : room === 'Premiere Room' ? 'Premiere' : room
+  const columns = [
+    { key: 'Date', label: 'Date', icon: CalendarDaysIcon },
+    { key: 'Occupancy', label: 'Occupancy', icon: ChartPieIcon },
+    { key: 'Allocation Status', label: 'Status', icon: SignalIcon },
+    { key: 'Unresolved Upgrade Rooms', label: 'Uncovered upgrades (hotel)', icon: ExclamationTriangleIcon },
+    { key: `${prefix} Remaining Inventory`, label: 'Remaining', icon: BuildingOfficeIcon },
+    { key: `${room} Upgrade Reserve`, label: 'Existing upgrades', icon: BuildingOfficeIcon },
+    { key: `${room} Override Reserve`, label: 'New override sales', icon: BuildingOfficeIcon },
+    { key: `${room} Operational Hold`, label: 'Buffer / holds', icon: BuildingOfficeIcon },
+    { key: `${room} Safe Inventory`, label: 'After reserves', icon: BuildingOfficeIcon },
+    { key: `${prefix} Online Inventory`, label: 'Proposed online', icon: BuildingStorefrontIcon },
+  ]
+  if (room === 'Deluxe Room' || room === 'Premiere Room') {
+    columns.push({ key: `${prefix} BAR Rate`, label: 'BAR', icon: BanknotesIcon })
+  }
+  return columns
+})
 
 const calculateYield = async () => {
   isLoading.value = true
@@ -327,7 +355,7 @@ const calculateYield = async () => {
       return
     }
 
-    await axios.post('/api/custom-yield', parsedConfig)
+    await axios.post('/api/custom-yield', { ...parsedConfig, include_simple_rooms: includeOtherRooms.value })
     
     const dataResponse = await axios.get('/api/db/inventory-allocation')
     if (dataResponse.data.status === 'success' && Array.isArray(dataResponse.data.data)) {
@@ -442,7 +470,7 @@ const exportData = async (format: 'csv' | 'excel' | 'json') => {
   }
 
   try {
-    const exportHeaders = tableHeaders.value.map(h => h.key);
+    const exportHeaders = Object.keys(allocationData.value[0]);
     const orderedData = allocationData.value.map(row => {
       const orderedRow: Record<string, any> = {}
       exportHeaders.forEach(header => {
@@ -456,7 +484,7 @@ const exportData = async (format: 'csv' | 'excel' | 'json') => {
         const csvContent = orderedData.map(row => 
           exportHeaders.map(header => {
             const value = row[header]
-            return typeof value === 'string' ? `"${value}"` : value
+            return typeof value === 'string' ? `"${value.replace(/"/g, '""')}"` : value
           }).join(',')
         ).join('\n')
         const csvHeaders = exportHeaders.join(',')

@@ -299,8 +299,7 @@ def build_batches(allocation_rows, skip_unchanged=True):
     2. Drop runs whose value already matches the current channel-manager value
        (cm_inventory_processed.db) when skip_unchanged is True - no PMS update needed for those.
     3. Group remaining runs that share the exact same (start, end, value) across room types -
-       these can be checked together in a single Save (this is what fires whenever the
-       Occupancy >= 95 override in yield_engine.py zeroes all 11 room types on the same days).
+       these can be checked together in a single Save.
     4. Re-key by (frozenset(room_types), value) so separate date windows sharing the same
        room-type set and value can be packed as multiple ranges in one modal too.
     5. Chunk each group's date ranges into batches of up to MAX_DATE_RANGES_PER_SAVE.

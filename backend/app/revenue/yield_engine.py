@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import sqlite3
 from ..infrastructure.paths import get_data_dir
+from .upgrade_reserves import load_policy, prepare_capacity, reserve_offer, room_count
 
 # Demand level configuration
 DEMAND_BINS = [0, 70, 85, 100]  # Bins for Low, Medium, High demand
@@ -30,10 +31,9 @@ ROOM_CAPS = {
     'The Anvaya Villa': 1,
 }
 
-# Room types that only get an online-inventory count (no BAR yielding), each
-# closed entirely once occupancy is near-full regardless of their own rule.
+# Room types that get online inventory only (no BAR yielding).
+# Availability is governed by shared capacity, not a hotel occupancy cutoff.
 SIMPLE_ROOM_TYPES = [k for k in ROOM_CAPS if k not in ('Deluxe Room', 'Premiere Room')]
-NEAR_FULL_OCCUPANCY_THRESHOLD = 97
 
 # Override configuration
 DELUXE_OVERRIDE_OCCUPANCY = 70  # Override threshold for occupancy
@@ -155,9 +155,7 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
 
     inventory_columns = ['Deluxe Room', 'Premiere Room'] + SIMPLE_ROOM_TYPES
     if data.isnull().any().any():
-        print("Warning: Missing values detected. Filling with 0 for inventory and median for Occupancy.")
-        data[inventory_columns] = data[inventory_columns].fillna(0)
-        data['Occupancy'] = data['Occupancy'].fillna(data['Occupancy'].median())
+        raise ValueError('Incomplete inventory snapshot: refresh both PMS and CM before calculating allocation')
     
     try:
         data['Date'] = pd.to_datetime(data['Date'])
@@ -207,11 +205,12 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
 def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None, room_caps=None,
                        include_simple_rooms=True,
                        deluxe_override_occupancy=None, deluxe_override_premiere=None,
-                       deluxe_override_amount=None, bar_level_shift=0):
+                       deluxe_override_amount=None, bar_level_shift=0, allocation_policy=None):
     # Use default values if not provided
     very_low_threshold_pct = very_low_threshold_pct or VERY_LOW_THRESHOLD_PCT
     low_threshold_pct = low_threshold_pct or LOW_THRESHOLD_PCT
-    room_caps = room_caps or ROOM_CAPS
+    room_caps = {**ROOM_CAPS, **(room_caps or {})}
+    policy = load_policy(ROOM_CAPS, allocation_policy)
     # Whole ranks to shift the base BAR matrix toward the more expensive tier
     # (negative shifts toward cheaper), applied before scarcity escalation.
     bar_level_shift = int(bar_level_shift) if bar_level_shift else 0
@@ -285,6 +284,13 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         new_rank = max(min_rank, min(max_rank, rank - bar_level_shift))
         return bar_rate_reverse.get(new_rank, base_bar)
 
+    deluxe_override_amount = room_count(deluxe_override_amount, 'Deluxe override amount')
+    data['Unresolved Upgrade Rooms'] = 0
+    data['Allocation Status'] = 'Ready'
+    for room in ROOM_CAPS:
+        for suffix in ('Upgrade Reserve', 'Override Reserve', 'Operational Hold', 'Safe Inventory'):
+            data[f'{room} {suffix}'] = 0
+
     data['Deluxe Online Inventory'] = 0
     data['Deluxe BAR Rate'] = ''
     data['Premiere Online Inventory'] = 0
@@ -297,8 +303,7 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         season = row['Season']
         demand = row['DemandLevel']
         if pd.isna(demand):
-            print(f"Warning: Skipping row {idx} due to invalid DemandLevel for {row['Date'].strftime('%Y-%m-%d')}.")
-            continue
+            raise ValueError(f"Invalid occupancy/demand for {row['Date']}")
 
         # Defensive check for required keys in the row
         if 'Premiere Room' not in row or 'Deluxe Room' not in row:
@@ -333,12 +338,6 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         # Premiere Room
         room = 'Premiere Room'
         remaining = premiere_remaining
-        # A Deluxe oversell (negative) gets upgraded into Premiere and consumes
-        # real Premiere availability; a Deluxe surplus (positive) cannot, since
-        # there is no Premiere->Deluxe downgrade. So the effective count Premiere
-        # can actually sell is premiere_remaining minus any Deluxe oversell.
-        effective_remaining = premiere_remaining + min(deluxe_remaining, 0)
-        online_inventory = get_online_allotment(effective_remaining, room_caps[room])
         base_bar = yield_matrix[room][season][demand]['bar']
         if base_bar not in valid_bar_rates:
             print(f"Warning: Invalid Premiere BAR Rate '{base_bar}' for {row['Date'].strftime('%Y-%m-%d')}. Using BAR5.")
@@ -346,21 +345,11 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         base_bar = shift_bar_base(base_bar, season)
         bar_rate = adjust_bar_rate(base_bar, remaining, room, demand, season)
         
-        data.at[idx, 'Premiere Online Inventory'] = online_inventory
         data.at[idx, 'Premiere BAR Rate'] = bar_rate
         
         # Deluxe Room
         room = 'Deluxe Room'
         remaining = deluxe_remaining
-
-        # Check for override conditions
-        if should_override_deluxe(row['Occupancy'], premiere_remaining, remaining,
-                                  deluxe_override_occupancy, deluxe_override_premiere):
-            # Never open more than the combined Deluxe+Premiere slack can absorb.
-            online_inventory = min(deluxe_override_amount, remaining + premiere_remaining)
-            print(f"{row['Date'].strftime('%Y-%m-%d')} Deluxe Room: Override applied - Opening {online_inventory} rooms (Occupancy: {row['Occupancy']:.2f}%, Premiere: {premiere_remaining}, Deluxe: {remaining})")
-        else:
-            online_inventory = get_online_allotment(remaining, room_caps[room])
 
         base_bar = yield_matrix[room][season][demand]['bar']
         if base_bar not in valid_bar_rates:
@@ -369,34 +358,74 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
         base_bar = shift_bar_base(base_bar, season)
         bar_rate = adjust_bar_rate(base_bar, remaining, room, demand, season)
         
-        data.at[idx, 'Deluxe Online Inventory'] = online_inventory
         data.at[idx, 'Deluxe BAR Rate'] = bar_rate
 
-        # Remaining room types: online-inventory count only, no BAR yielding.
-        # Fully closed once occupancy is near-full, regardless of their own rule.
-        if include_simple_rooms:
-            near_full = row['Occupancy'] >= NEAR_FULL_OCCUPANCY_THRESHOLD
-            premiere_suite_remaining = row['Premiere Suite Room']
-            for room_type in SIMPLE_ROOM_TYPES:
-                remaining = row[room_type]
-                if near_full:
-                    simple_online = 0
-                elif room_type in ('Deluxe Pool Access', 'Premiere Room Lagoon Access', 'Premiere Suite Room'):
-                    simple_online = get_online_allotment(remaining, room_caps[room_type])
-                elif room_type == 'Deluxe Suite Room':
-                    simple_online = allot_deluxe_suite(remaining, premiere_suite_remaining)
-                elif room_type == 'Beach Front Private Suite Room':
-                    simple_online = allot_minus_one_except_one(remaining)
-                elif room_type in ('Family Premiere Room', 'The Anvaya Suite Whirpool', 'The Anvaya Suite No Pool'):
-                    simple_online = allot_minus_one(remaining)
-                else:  # The Anvaya Suite With Pool, The Anvaya Residence, The Anvaya Villa
-                    simple_online = allot_as_remaining(remaining)
-                data.at[idx, f'{room_type} Online Inventory'] = simple_online
+        # Rebuild capacity from the current snapshot. PMS assignments have
+        # already restored the booked type and deducted the physical destination.
+        remaining_by_room = {room: row[room] for room in ROOM_CAPS}
+        safe, reserved, protected, online_caps, unresolved = prepare_capacity(
+            remaining_by_room, policy, row['Date'].strftime('%Y-%m-%d'))
+        override_reserves = dict.fromkeys(ROOM_CAPS, 0)
+        allocations = dict.fromkeys(ROOM_CAPS, 0)
+        if not unresolved:
+            # New borrowed sales consume the same capacity as direct sales.
+            # Preserve Deluxe's existing override trigger, but reserve its backing
+            # BEFORE calculating Premiere's direct release.
+            if should_override_deluxe(row['Occupancy'], premiere_remaining, deluxe_remaining,
+                                      deluxe_override_occupancy, deluxe_override_premiere):
+                amount = min(deluxe_override_amount, online_caps.get('Deluxe Room', deluxe_override_amount))
+                # Deluxe overrides retain their existing Premiere-only backing.
+                # Higher rooms cover existing guests; this does not introduce
+                # additional deliberate Premiere overselling.
+                allocations['Deluxe Room'] = reserve_offer(
+                    'Deluxe Room', amount, safe,
+                    {'Deluxe Room': ['Premiere Room']} if 'Premiere Room' in policy['routes']['Deluxe Room'] else {},
+                    override_reserves)
+            else:
+                allocations['Deluxe Room'] = get_online_allotment(safe['Deluxe Room'], room_caps['Deluxe Room'])
+
+            if include_simple_rooms:
+                if remaining_by_room['Deluxe Suite Room'] <= 0 and safe['Premiere Suite Room'] > 3:
+                    allocations['Deluxe Suite Room'] = reserve_offer(
+                        'Deluxe Suite Room', min(1, online_caps.get('Deluxe Suite Room', 1)),
+                        safe, policy['routes'], override_reserves)
+                for room_type in SIMPLE_ROOM_TYPES:
+                    remaining = safe[room_type]
+                    if room_type in ('Deluxe Pool Access', 'Premiere Room Lagoon Access', 'Premiere Suite Room'):
+                        allocations[room_type] = get_online_allotment(remaining, room_caps[room_type])
+                    elif room_type == 'Deluxe Suite Room':
+                        if remaining_by_room[room_type] > 0:
+                            allocations[room_type] = allot_deluxe_suite(remaining, 0)
+                    elif room_type == 'Beach Front Private Suite Room':
+                        allocations[room_type] = allot_minus_one_except_one(remaining)
+                    elif room_type in ('Family Premiere Room', 'The Anvaya Suite Whirpool', 'The Anvaya Suite No Pool'):
+                        allocations[room_type] = allot_minus_one(remaining)
+                    else:
+                        allocations[room_type] = allot_as_remaining(remaining)
+            allocations['Premiere Room'] = get_online_allotment(safe['Premiere Room'], room_caps['Premiere Room'])
+        else:
+            data.at[idx, 'Allocation Status'] = 'Blocked: upgrade capacity or routes insufficient'
+        data.at[idx, 'Unresolved Upgrade Rooms'] = unresolved
+        for room_type in ROOM_CAPS:
+            data.at[idx, f'{room_type} Upgrade Reserve'] = reserved[room_type]
+            data.at[idx, f'{room_type} Override Reserve'] = override_reserves[room_type]
+            data.at[idx, f'{room_type} Operational Hold'] = protected[room_type]
+            data.at[idx, f'{room_type} Safe Inventory'] = safe[room_type]
+            prefix = {'Deluxe Room': 'Deluxe', 'Premiere Room': 'Premiere'}.get(room_type, room_type)
+            if room_type in ('Deluxe Room', 'Premiere Room') or include_simple_rooms:
+                data.at[idx, f'{prefix} Online Inventory'] = min(
+                    allocations[room_type], online_caps.get(room_type, allocations[room_type]))
 
     return data
 
+def diagnostic_columns():
+    return ['Allocation Status', 'Unresolved Upgrade Rooms'] + [
+        f'{room} {suffix}' for room in ROOM_CAPS
+        for suffix in ('Upgrade Reserve', 'Override Reserve', 'Operational Hold', 'Safe Inventory')]
+
+
 def apply_custom_yield(config):
-    """Run the Deluxe/Premiere-only custom yield calculation (from a
+    """Run the custom yield calculation (from a
     /api/custom-yield-shaped config dict) and persist the result to
     inventory_allocation.db. Raises FileNotFoundError if combined_inventory.db
     is missing, or RuntimeError if the load/compute/write step fails, instead
@@ -414,29 +443,36 @@ def apply_custom_yield(config):
 
     bar_level_shift = int(config.get('bar_level_shift', 0) or 0)
 
+    include_simple_rooms = config.get('include_simple_rooms', False)
+    if not isinstance(include_simple_rooms, bool):
+        raise ValueError('include_simple_rooms must be a boolean')
+
     result = apply_yield_matrix(
         data,
         very_low_threshold_pct=config['very_low_threshold_pct'] / 100,
         low_threshold_pct=config['low_threshold_pct'] / 100,
         room_caps=config['room_caps'],
-        include_simple_rooms=False,
+        include_simple_rooms=include_simple_rooms,
         deluxe_override_occupancy=config['deluxe_override_occupancy'],
         deluxe_override_premiere=config['deluxe_override_premiere'],
         deluxe_override_amount=config['deluxe_override_amount'],
         bar_level_shift=bar_level_shift
     )
 
-    # Rename and select the Deluxe/Premiere output columns to match the
-    # frontend table headers (and the default /api/yield output).
+    # Preserve existing base-column names, plus per-category diagnostics.
     result = result.rename(columns={
         'Deluxe Room': 'Deluxe Remaining Inventory',
-        'Premiere Room': 'Premiere Remaining Inventory'
+        'Premiere Room': 'Premiere Remaining Inventory',
+        **{room: f'{room} Remaining Inventory' for room in SIMPLE_ROOM_TYPES}
     })
+    extra_columns = diagnostic_columns() + [f'{room} Remaining Inventory' for room in SIMPLE_ROOM_TYPES]
+    if include_simple_rooms:
+        extra_columns += [f'{room} Online Inventory' for room in SIMPLE_ROOM_TYPES]
     result = result[[
         'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
         'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
         'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
-    ]]
+    ] + extra_columns]
     result['Occupancy'] = result['Occupancy'].round(2)
     result['Date'] = pd.to_datetime(result['Date']).dt.strftime('%Y-%m-%d')
 
@@ -456,6 +492,7 @@ def apply_custom_yield(config):
         'Premiere Online Inventory': 'INTEGER',
         'Premiere BAR Rate': 'TEXT'
     }
+    dtype.update({col: ('TEXT' if col == 'Allocation Status' else 'INTEGER') for col in extra_columns})
     result.to_sql('daily_inventory_allocation', conn, if_exists='replace', index=False, dtype=dtype)
     count = conn.execute("SELECT COUNT(*) FROM daily_inventory_allocation").fetchone()[0]
     conn.close()
@@ -495,7 +532,7 @@ def main():
             'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',
             'Deluxe Remaining Inventory', 'Deluxe Online Inventory', 'Deluxe BAR Rate',
             'Premiere Remaining Inventory', 'Premiere Online Inventory', 'Premiere BAR Rate'
-        ] + simple_room_columns]
+        ] + simple_room_columns + diagnostic_columns()]
         
         # Format the date and occupancy
         output['Date'] = output['Date'].dt.strftime('%Y-%m-%d')
@@ -536,6 +573,7 @@ def main():
         }
         
         # Save to database
+        dtype.update({col: ('TEXT' if col == 'Allocation Status' else 'INTEGER') for col in diagnostic_columns()})
         output.to_sql('daily_inventory_allocation', conn, if_exists='replace', index=False, dtype=dtype)
         
         # Verify the data was written
