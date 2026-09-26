@@ -11,10 +11,11 @@ than imported, so this module doesn't have to route progress messages through
 runner.py's queue/globals to stay standalone (same rationale documented in
 fast_allotment_updater.py for duplicating _build_date_ranges).
 
-The allotment stage is intentionally fixed to Deluxe + Premiere only, matching
-what runner.py's automated pipeline covers today - the other 11 room types
-remain a separate manual action (other_room_allotment_updater.py /
-/api/update-rest-allotment), unchanged.
+The allotment stage can push any subset of the 13 room types
+fast_allotment_updater.FULL_ROOM_TYPE_CONFIG knows about - the caller (the
+Fast API Pipeline page) chooses which ones via config["allotmentRoomTypes"].
+Defaults to Deluxe + Premiere only when omitted, matching what runner.py's
+automated Selenium pipeline covers today.
 """
 
 import os
@@ -30,7 +31,7 @@ import pandas as pd
 
 from ..shared import log_queue, allotment_run_control
 from ..integrations.pms.fast_inventory_scraper import fetch_room_inventory
-from ..integrations.pms.fast_allotment_updater import build_full_plan, push_jobs_concurrent
+from ..integrations.pms.fast_allotment_updater import build_full_plan, push_jobs_concurrent, FULL_ROOM_TYPE_CONFIG
 from ..inventory.pms_processor import process_pms_inventory
 from ..integrations.dedge.inventory_scraper import scrape_cm_inventory
 from ..inventory.inventory_combiner import combine_inventory_files
@@ -44,9 +45,9 @@ STEPS = [
     {"id": "scrape_pms", "label": "Scrape PMS inventory (API)"},
     {"id": "scrape_cm", "label": "Scrape Channel Manager (D-EDGE)"},
     {"id": "combine", "label": "Combine inventory"},
-    {"id": "yield", "label": "Calculate yield (Deluxe/Premiere)"},
+    {"id": "yield", "label": "Calculate yield"},
     {"id": "verify", "label": "Verify data"},
-    {"id": "allotment", "label": "Push Deluxe + Premiere allotment (PMS API)"},
+    {"id": "allotment", "label": "Push allotment (PMS API)"},
     {"id": "bar", "label": "Update BAR pricing (D-EDGE)"},
 ]
 STEP_IDS = [s["id"] for s in STEPS]
@@ -245,8 +246,11 @@ def run_pipeline(config):
     config["steps"]: optional dict of step id -> bool, same shape as
     runner.py's config["steps"].
     config["barRooms"]: optional list of "deluxe"/"premiere" narrowing the BAR
-    step; an empty list is equivalent to skipping it. The allotment step is
-    always Deluxe + Premiere (not narrowable) - see module docstring.
+    step; an empty list is equivalent to skipping it.
+    config["allotmentRoomTypes"]: optional list of FULL_ROOM_TYPE_CONFIG keys
+    narrowing the allotment step; defaults to ["deluxe", "premiere"] when
+    omitted, and an empty list is equivalent to skipping it (same convention
+    as barRooms).
     config["allotmentDryRun"]: default True - builds every allotment payload
     without sending it. Must be explicitly set False to push live.
     """
@@ -257,6 +261,10 @@ def run_pipeline(config):
 
     enabled = {s["id"]: (config.get("steps") or {}).get(s["id"], True) for s in STEPS}
     bar_rooms = tuple(config.get("barRooms") or ("deluxe", "premiere"))
+    allotment_room_types = config.get("allotmentRoomTypes")
+    if allotment_room_types is None:
+        allotment_room_types = ["deluxe", "premiere"]
+    allotment_room_types = [k for k in allotment_room_types if k in FULL_ROOM_TYPE_CONFIG]
     allotment_dry_run = config.get("allotmentDryRun", True) is not False
 
     step_ref = [None]
@@ -325,26 +333,47 @@ def run_pipeline(config):
         else:
             skip("verify")
 
-        if enabled["allotment"]:
+        if enabled["allotment"] and allotment_room_types:
             begin("allotment")
-            plan = build_full_plan(room_types=["deluxe", "premiere"], skip_unchanged=config.get("skipUnchanged", True))
+            plan = build_full_plan(room_types=allotment_room_types, skip_unchanged=config.get("skipUnchanged", True))
             if not plan["jobs"]:
                 _emit("allotment", "success", f"Nothing to push - {plan['skipped_ranges']} range(s) already match the channel manager")
             else:
-                _emit("allotment", "info", f"{len(plan['jobs'])} job(s) planned, {plan['skipped_ranges']} range(s) skipped (already matches CM)")
+                total_jobs = len(plan["jobs"])
+                _emit("allotment", "info", f"{total_jobs} job(s) planned, {plan['skipped_ranges']} range(s) skipped (already matches CM)")
+
+                progress = {"n": 0}
+
+                def _on_job_result(r):
+                    progress["n"] += 1
+                    job = r["job"]
+                    tag = f"[{progress['n']}/{total_jobs}]"
+                    where = f"{job['label']} {job['start_date']}..{job['end_date']}"
+                    retried_note = f" (after {r['attempts']} attempts)" if r.get("attempts", 1) > 1 else ""
+                    if r["success"]:
+                        state = "closed" if job["number_of_rooms"] <= 0 else f"{job['number_of_rooms']} room(s)"
+                        _emit("allotment", "info", f"{tag} OK{retried_note} {where} -> {state}")
+                    else:
+                        _emit("allotment", "error", f"{tag} FAILED{retried_note} {where}: {r['error']}")
+
+                def _on_retry(attempt, retrying_count, max_attempts):
+                    _emit("allotment", "info", f"Retrying {retrying_count} job(s) that hit a transient PMS error (attempt {attempt}/{max_attempts})...")
+
                 result = push_jobs_concurrent(
                     plan["jobs"],
                     company_id=config.get("companyId", 1001),
                     dry_run=allotment_dry_run,
                     max_workers=config.get("allotmentConcurrency", 8),
                     username=config["pmsUsername"], password=config["pmsPassword"],
+                    on_result=_on_job_result,
+                    on_retry=_on_retry,
                 )
                 mode = "dry run" if allotment_dry_run else "LIVE"
                 if not allotment_dry_run and result["failed_count"] > 0:
-                    raise PipelineStepError("allotment", f"{result['failed_count']} of {result['total']} allotment push(es) failed")
+                    raise PipelineStepError("allotment", f"{result['failed_count']} of {result['total']} allotment push(es) failed - see the FAILED lines above for which ones and why")
                 _emit("allotment", "success", f"Allotment ({mode}): {result['success_count']}/{result['total']} succeeded in {result['elapsed_seconds']:.2f}s")
         else:
-            skip("allotment")
+            skip("allotment", "No room types selected" if enabled["allotment"] else "Skipped by user")
 
         if enabled["bar"] and bar_rooms:
             begin("bar")

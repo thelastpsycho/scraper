@@ -14,6 +14,12 @@ FULL_ROOM_TYPE_CONFIG mirrors ROOM_TYPE_CONFIG (allotment_updater.py) +
 REST_ROOM_TYPE_CONFIG (other_room_allotment_updater.py) - duplicated rather
 than imported so this module stays fully standalone from the Selenium code
 path it's meant to validate.
+
+A job with zero rooms is pushed as an explicit close (IsClosed/Closed: "X"),
+matching the PMS "Add Allotment Room" modal's own Close checkbox, rather than
+NoOfRoom=0 with the category left open. The Selenium updaters this module is
+validated against don't do this (no Close-checkbox interaction there) - only
+this API path closes zero-inventory dates.
 """
 
 import concurrent.futures
@@ -76,6 +82,10 @@ def push_allotment(company_id, room_type, start_date, end_date, number_of_rooms,
     client = PMSApiClient(username=username, password=password)
     client.login()
 
+    # Zero rooms is sent as an explicit close (IsClosed/Closed), not just
+    # NoOfRoom=0 - matches the PMS "Add Allotment Room" modal's own Close
+    # checkbox rather than leaving the category open with a zero count.
+    is_closed = number_of_rooms <= 0
     payload = {
         "CompanyId": company_id,
         "StartDate": _to_pms_date(start_date),
@@ -83,8 +93,8 @@ def push_allotment(company_id, room_type, start_date, end_date, number_of_rooms,
         "TypeId": room_type,
         "NoOfRoom": number_of_rooms,
         "Remark": remark,
-        "IsClosed": False,
-        "Closed": "0",
+        "IsClosed": is_closed,
+        "Closed": "X" if is_closed else "0",
         "HotelId": client.hotel_id,
         "UserId": client.user_id,
     }
@@ -103,7 +113,7 @@ def push_allotment(company_id, room_type, start_date, end_date, number_of_rooms,
             type_id=room_type,
             no_of_rooms=number_of_rooms,
             remark=remark,
-            is_closed=False,
+            is_closed=is_closed,
         )
 
     result["elapsed_seconds"] = time.monotonic() - started
@@ -194,9 +204,28 @@ def build_full_plan(room_types=None, max_dates=None, skip_unchanged=True):
     return plan
 
 
-def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, username=None, password=None):
+def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, username=None, password=None,
+                          on_result=None, on_retry=None, max_retries=2, retry_delay=3.0):
     """Fire one PMS login, then push every job concurrently (bounded by
     max_workers). dry_run=True builds every payload without sending it.
+
+    A handful of jobs failing with a PMS-side "error occurred while sending
+    the request" or an HttpClient timeout - while the same room type/date
+    shape succeeds in every other job in the same run - has been observed in
+    production to be the PMS's own backend buckling under max_workers
+    concurrent requests, not a bad payload. Those failures are retried up to
+    max_retries times, retry_delay seconds apart; retrying only the small
+    failed subset (not all jobs) removes the contention that caused it.
+
+    on_result: optional callback invoked once per job with its FINAL outcome
+    (after any retries), as soon as that outcome is known - lets a caller
+    stream live progress instead of only seeing a single summary once every
+    job has finished. on_retry(attempt, retrying_count, max_attempts):
+    optional callback fired once per retry round, before it starts.
+    result['attempts'] tells a caller a job needed more than one try.
+
+    Both callbacks are called from the same thread that's iterating results,
+    so it's safe to mutate caller-owned state without extra locking.
 
     Returns a summary dict with per-job results, safe to return directly as a
     JSON API response.
@@ -204,9 +233,15 @@ def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, use
     started = time.monotonic()
     client = PMSApiClient(username=username, password=password)
     client.login()
+    max_attempts = max_retries + 1
 
     def run_one(job):
+        # Zero rooms closes the category (IsClosed/Closed) instead of leaving
+        # it open with a zero count - see push_allotment()'s docstring note.
+        is_closed = job['number_of_rooms'] <= 0
         remark = f"Updated from yield matrix - {job['label']} Online Inventory {job['number_of_rooms']}"
+        if is_closed:
+            remark += " (closed)"
         payload_preview = {
             'CompanyId': company_id,
             'StartDate': job['start_date'],
@@ -214,6 +249,8 @@ def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, use
             'TypeId': job['checkbox_value'],
             'NoOfRoom': job['number_of_rooms'],
             'Remark': remark,
+            'IsClosed': is_closed,
+            'Closed': 'X' if is_closed else '0',
         }
         result = {'job': job, 'payload': payload_preview, 'success': None, 'response': None, 'error': None}
         if dry_run:
@@ -227,6 +264,7 @@ def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, use
                 type_id=job['checkbox_value'],
                 no_of_rooms=job['number_of_rooms'],
                 remark=remark,
+                is_closed=is_closed,
             )
             result['response'] = resp
             result['success'] = bool(resp.get('IsSuccess'))
@@ -237,10 +275,36 @@ def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, use
             result['error'] = str(e)
         return result
 
-    results = []
-    if jobs:
+    def run_batch(batch):
+        out = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(run_one, jobs))
+            futures = [pool.submit(run_one, job) for job in batch]
+            for future in concurrent.futures.as_completed(futures):
+                out.append(future.result())
+        return out
+
+    results = []
+    pending = list(jobs)
+    attempt = 1
+    while pending:
+        batch_results = run_batch(pending)
+        next_pending = []
+        for r in batch_results:
+            r['attempts'] = attempt
+            is_final = r['success'] or dry_run or attempt >= max_attempts
+            if is_final:
+                results.append(r)
+                if on_result:
+                    on_result(r)
+            else:
+                next_pending.append(r['job'])
+        if not next_pending:
+            break
+        if on_retry:
+            on_retry(attempt + 1, len(next_pending), max_attempts)
+        time.sleep(retry_delay)
+        pending = next_pending
+        attempt += 1
 
     success_count = sum(1 for r in results if r['success'])
     return {

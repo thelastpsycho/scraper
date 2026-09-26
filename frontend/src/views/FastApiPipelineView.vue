@@ -74,9 +74,9 @@
           </div>
 
           <!-- PMS API push settings + BAR room narrowing -->
-          <div v-if="stepEnabled.allotment || stepEnabled.bar" class="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
-            <div v-if="stepEnabled.allotment" class="flex flex-wrap items-center gap-2">
-              <span class="font-semibold text-slate-600">Allotment push (Deluxe + Premiere):</span>
+          <div v-if="stepEnabled.allotment" class="mt-2 space-y-2 text-[11px] text-slate-500">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-semibold text-slate-600">Allotment push:</span>
               <label class="inline-flex cursor-pointer items-center gap-1" title="Builds every payload and logs in, but never calls the PMS save endpoint.">
                 <input type="radio" :value="true" v-model="allotmentDryRun" :disabled="isRunning" class="h-3 w-3 accent-app-accent" /> Dry run
               </label>
@@ -91,7 +91,26 @@
                 <input v-model.number="allotmentConcurrency" type="number" min="1" max="20" :disabled="isRunning" class="neu-input w-14 py-0.5 text-center disabled:opacity-60" />
               </label>
             </div>
-            <div v-if="stepEnabled.bar" class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="font-semibold text-slate-600">Room types:</span>
+              <button type="button" @click="setAllRoomTypes(true)" :disabled="isRunning" class="rounded bg-app-primary px-1.5 py-0.5 font-semibold text-app-accent shadow-neu-inset-sm disabled:opacity-50">All</button>
+              <button type="button" @click="setAllRoomTypes(false)" :disabled="isRunning" class="rounded bg-app-primary px-1.5 py-0.5 font-semibold text-slate-500 shadow-neu-inset-sm disabled:opacity-50">None</button>
+              <label
+                v-for="rt in roomTypeConfig"
+                :key="rt.key"
+                class="inline-flex cursor-pointer items-center gap-1 rounded-full bg-app-primary py-0.5 pl-1.5 pr-2 shadow-neu-inset-sm"
+              >
+                <input type="checkbox" :value="rt.key" v-model="allotmentRoomTypes" :disabled="isRunning" class="h-3 w-3 accent-app-accent" />
+                {{ rt.label }}
+              </label>
+            </div>
+            <p v-if="allotmentNeedsAllRoomYield && stepEnabled.yield && !includeAllRoomTypes" class="rounded-lg bg-app-primary px-3 py-2 font-semibold text-amber-700 shadow-neu-inset-sm">
+              You've selected a room type beyond Deluxe/Premiere, but "Calculate allocations for all room categories" is off in Yield configuration - those types will have no Online Inventory to push.
+            </p>
+          </div>
+
+          <div v-if="stepEnabled.bar" class="mt-2 flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
+            <div class="flex items-center gap-2">
               <span class="font-semibold text-slate-600">BAR rooms:</span>
               <label class="inline-flex cursor-pointer items-center gap-1">
                 <input type="checkbox" v-model="barRooms.deluxe" :disabled="isRunning" class="h-3 w-3 accent-app-accent" /> Deluxe
@@ -103,7 +122,7 @@
           </div>
 
           <p v-if="stepEnabled.allotment && !allotmentDryRun" class="mt-2 rounded-lg bg-app-primary px-3 py-2 text-[11px] font-semibold text-amber-700 shadow-neu-inset-sm">
-            Live mode will push real allotment changes to the PMS for every Deluxe/Premiere date range that differs from the channel manager.
+            Live mode will push real allotment changes to the PMS for every {{ allotmentRoomLabels.join(', ') || '(no room types selected)' }} date range that differs from the channel manager.
           </p>
 
           <label v-if="stepEnabled.bar" class="mt-2 inline-flex items-start gap-2 text-xs text-amber-800">
@@ -112,7 +131,7 @@
           </label>
 
           <button
-            @click="startPipeline"
+            @click="openStartConfirm"
             :disabled="isRunning"
             class="btn-primary mt-4 w-full px-5 py-2.5"
           >
@@ -275,15 +294,97 @@
               <label class="block text-xs font-semibold text-slate-600">BAR shift levels</label>
               <input v-model.number="yieldForm.bar_level_shift" type="number" step="1" class="neu-input mt-1 disabled:opacity-60" :disabled="isRunning" />
             </div>
+            <label class="flex items-start gap-2 text-xs text-slate-600">
+              <input v-model="includeAllRoomTypes" type="checkbox" :disabled="isRunning" class="mt-0.5 accent-app-accent" />
+              <span>
+                Calculate allocations for all room categories
+                <span class="block text-[11px] font-normal text-slate-500">Required for the allotment step to push anything beyond Deluxe/Premiere - without this, the other room types' Online Inventory won't be written and their allotment jobs will be empty.</span>
+              </span>
+            </label>
           </div>
         </details>
+      </div>
+    </div>
+
+    <!-- Confirm-before-start modal, same overlay pattern as InventoryCollectionView.vue -->
+    <div v-if="showStartConfirm" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-500/20 p-4 backdrop-blur-sm">
+      <div class="relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl bg-app-primary p-6 shadow-neu">
+        <button @click="showStartConfirm = false" class="btn-icon absolute right-4 top-4 !p-2">
+          <XMarkIcon class="h-5 w-5" />
+        </button>
+        <h3 class="flex shrink-0 items-center gap-2 font-semibold text-base text-app-tertiary">
+          <ExclamationTriangleIcon v-if="confirmIsLive" class="h-5 w-5 shrink-0 text-amber-600" />
+          Confirm this pipeline run
+        </h3>
+        <p class="mt-1 shrink-0 text-sm text-slate-500">Check the scope below before it starts — this can't be recalled once live steps begin.</p>
+
+        <div class="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
+          <div class="space-y-2.5 rounded-xl bg-app-primary p-4 text-sm shadow-neu-inset">
+            <p><span class="font-semibold text-slate-600">Date range:</span> {{ confirmDateRangeText }}</p>
+            <p v-if="confirmAllotmentLine" :class="stepEnabled.allotment && !allotmentDryRun && allotmentRoomTypes.length ? 'font-semibold text-rose-700' : 'text-slate-600'">
+              {{ confirmAllotmentLine }}
+            </p>
+            <p v-else class="text-slate-500">Allotment: step is off — no PMS allotment changes.</p>
+
+            <div v-if="stepEnabled.allotment && allotmentRoomTypes.length" class="rounded-lg bg-app-primary p-3 text-xs shadow-neu-inset-sm">
+              <div v-if="allotmentPlanLoading" class="flex items-center gap-2 text-slate-500">
+                <span class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-app-accent"></span>
+                Building batch preview from the current inventory_allocation.db…
+              </div>
+              <div v-else-if="allotmentPlanError" class="text-slate-500">{{ allotmentPlanError }}</div>
+              <div v-else-if="allotmentPlanPreview">
+                <p class="font-semibold text-slate-600">
+                  Batch preview: {{ allotmentPlanPreview.totalJobs }} job(s) — one PMS call per contiguous date range
+                  <span v-if="allotmentPlanPreview.skippedRanges">, {{ allotmentPlanPreview.skippedRanges }} range(s) skipped (already match CM)</span>
+                </p>
+                <p v-if="upstreamStepsWillRecalculate" class="mt-1 text-[11px] text-amber-700">
+                  Scrape/combine/yield will run first and can change these counts — this preview is from the last calculation, not this run's.
+                </p>
+                <ul class="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-slate-600 sm:grid-cols-3">
+                  <li v-for="(info, key) in allotmentPlanPreview.byRoomType" :key="key" class="flex justify-between gap-2">
+                    <span>{{ info.label }}</span>
+                    <span class="font-semibold">{{ info.job_count }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <p v-if="confirmBarLine" :class="confirmBarRoomLabels.length ? 'font-semibold text-rose-700' : 'text-slate-600'">
+              {{ confirmBarLine }}
+            </p>
+            <p v-else class="text-slate-500">BAR pricing: step is off — no D-EDGE price changes.</p>
+          </div>
+
+          <p v-if="confirmIsLive" class="rounded-lg bg-app-primary px-3 py-2 text-xs font-semibold text-rose-700 shadow-neu-inset-sm">
+            This will make LIVE changes to the PMS and/or D-EDGE. Double-check the room types and date range above before continuing.
+          </p>
+          <p v-else class="rounded-lg bg-app-primary px-3 py-2 text-xs font-semibold text-emerald-700 shadow-neu-inset-sm">
+            No live PMS or D-EDGE changes will be sent by this run.
+          </p>
+        </div>
+
+        <div class="mt-5 flex shrink-0 gap-3">
+          <button
+            @click="showStartConfirm = false"
+            class="flex-1 rounded-xl bg-app-primary px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-neu-sm transition-all hover:text-app-accent active:shadow-neu-inset-sm"
+          >
+            Cancel
+          </button>
+          <button
+            @click="confirmAndStartPipeline"
+            :class="confirmIsLive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-app-accent hover:brightness-110'"
+            class="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-neu-sm transition-colors"
+          >
+            {{ confirmIsLive ? 'Yes, start LIVE run' : 'Start pipeline' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import axios from '../plugins/axios'
 import PageHeader from '../components/PageHeader.vue'
 import { usePipelineStream, type PipelineStepDef } from '../composables/usePipelineStream'
@@ -292,6 +393,8 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   MinusCircleIcon,
+  XMarkIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 
 const PIPELINE_STEPS: PipelineStepDef[] = [
@@ -316,15 +419,43 @@ function toggleStep(id: string) {
   stepEnabled.value[id] = !stepEnabled.value[id]
 }
 
-// Allotment is always Deluxe + Premiere (not narrowable) - matches what the
-// existing automated Selenium pipeline covers today. The other 11 room types
-// stay a separate manual action (Allotment Management page).
 const allotmentDryRun = ref(true)
 const allotmentConcurrency = ref(8)
 const companyId = ref(1001)
 const barRooms = ref({ deluxe: true, premiere: true })
 const resetCheckpoint = ref(false)
 const skipUnchanged = ref(true)
+
+// Room types available for the allotment push, fetched from the same config
+// the PMS API test page uses so this list can't drift from the backend's
+// FULL_ROOM_TYPE_CONFIG. Defaults to all 13 selected; unchecking any lets you
+// skip that category for this run.
+const roomTypeConfig = ref<{ key: string; label: string; checkboxValue: string }[]>([])
+const allotmentRoomTypes = ref<string[]>([])
+onMounted(async () => {
+  try {
+    const res = await axios.get('/api/pms-fast/room-type-config')
+    roomTypeConfig.value = res.data.roomTypes
+    allotmentRoomTypes.value = roomTypeConfig.value.map(rt => rt.key)
+  } catch {
+    // Falls back to the two types the backend defaults to when the field is
+    // omitted, so the page still works if this lookup fails.
+    roomTypeConfig.value = [
+      { key: 'deluxe', label: 'Deluxe', checkboxValue: 'DLT' },
+      { key: 'premiere', label: 'Premiere', checkboxValue: 'PRKG' },
+    ]
+    allotmentRoomTypes.value = ['deluxe', 'premiere']
+  }
+})
+const allotmentRoomLabels = computed(() =>
+  roomTypeConfig.value.filter(rt => allotmentRoomTypes.value.includes(rt.key)).map(rt => rt.label)
+)
+function setAllRoomTypes(selected: boolean) {
+  allotmentRoomTypes.value = selected ? roomTypeConfig.value.map(rt => rt.key) : []
+}
+const allotmentNeedsAllRoomYield = computed(() =>
+  allotmentRoomTypes.value.some(key => key !== 'deluxe' && key !== 'premiere')
+)
 
 const pmsUsername = ref('')
 const pmsPassword = ref('')
@@ -386,6 +517,7 @@ const yieldForm = ref<YieldConfigForm>({
   ...defaultYieldConfig,
   room_caps: { ...defaultYieldConfig.room_caps },
 })
+const includeAllRoomTypes = ref(true)
 
 function parseArrayInput(input: string | any[]): any[] {
   if (Array.isArray(input)) return input
@@ -411,6 +543,7 @@ function buildYieldConfig() {
       'Deluxe Room': Number(roomCaps['Deluxe Room']),
       'Premiere Room': Number(roomCaps['Premiere Room']),
     },
+    include_simple_rooms: includeAllRoomTypes.value,
   }
 
   if (
@@ -427,22 +560,105 @@ function buildYieldConfig() {
   return parsed
 }
 
-async function startPipeline() {
-  configError.value = ''
-  let yieldConfig
+// PMS API step fetches a fixed 100-day window from startDate
+// (fast_inventory_scraper.fetch_room_inventory's `days` argument in
+// fast_runner.py) - shown in the confirm dialog so the date range is never a surprise.
+const PMS_FETCH_DAYS = 100
+
+function formatConfirmDate(iso: string) {
+  const d = new Date(`${iso}T00:00:00`)
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+const confirmDateRangeText = computed(() => {
+  const start = new Date(`${startDate.value}T00:00:00`)
+  if (isNaN(start.getTime())) return startDate.value
+  const end = new Date(start)
+  end.setDate(end.getDate() + PMS_FETCH_DAYS - 1)
+  return `${formatConfirmDate(startDate.value)} → ${end.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })} (${PMS_FETCH_DAYS} nights)`
+})
+
+const confirmBarRoomLabels = computed(() =>
+  Object.entries(barRooms.value).filter(([, v]) => v).map(([k]) => (k === 'deluxe' ? 'Deluxe' : 'Premiere'))
+)
+
+const confirmAllotmentLine = computed(() => {
+  if (!stepEnabled.value.allotment) return null
+  if (allotmentRoomTypes.value.length === 0) return 'Allotment: no room types selected — this step will be skipped.'
+  const mode = allotmentDryRun.value ? 'DRY RUN — payloads built, nothing sent' : 'LIVE — will write to the PMS'
+  return `Allotment (${mode}): ${allotmentRoomLabels.value.join(', ')}`
+})
+
+const confirmBarLine = computed(() => {
+  if (!stepEnabled.value.bar) return null
+  if (confirmBarRoomLabels.value.length === 0) return 'BAR pricing: no room types selected — this step will be skipped.'
+  return `BAR pricing (LIVE — no dry-run mode for this step): ${confirmBarRoomLabels.value.join(', ')}, based on the yield matrix calculation`
+})
+
+const confirmIsLive = computed(() =>
+  (stepEnabled.value.allotment && !allotmentDryRun.value && allotmentRoomTypes.value.length > 0) ||
+  (stepEnabled.value.bar && confirmBarRoomLabels.value.length > 0)
+)
+
+const showStartConfirm = ref(false)
+const pendingYieldConfig = ref<ReturnType<typeof buildYieldConfig> | null>(null)
+
+// Batch preview for the allotment step: reads the *existing*
+// inventory_allocation.db via the same local, network-free planner the PMS
+// API test page uses (/api/pms-fast/allotment-bulk/plan - no PMS login, no
+// side effects). If scrape/combine/yield are also enabled for this run, this
+// preview reflects the last calculation, not what this run will produce -
+// flagged explicitly in the modal rather than silently shown as exact.
+const allotmentPlanPreview = ref<{
+  totalJobs: number
+  skippedRanges: number
+  byRoomType: Record<string, { label: string; job_count: number }>
+} | null>(null)
+const allotmentPlanLoading = ref(false)
+const allotmentPlanError = ref('')
+
+async function loadAllotmentPlanPreview() {
+  allotmentPlanPreview.value = null
+  allotmentPlanError.value = ''
+  if (!stepEnabled.value.allotment || allotmentRoomTypes.value.length === 0) return
+  allotmentPlanLoading.value = true
   try {
-    yieldConfig = buildYieldConfig()
+    const res = await axios.post('/api/pms-fast/allotment-bulk/plan', {
+      roomTypes: allotmentRoomTypes.value,
+      skipUnchanged: skipUnchanged.value,
+    })
+    allotmentPlanPreview.value = {
+      totalJobs: res.data.totalJobs,
+      skippedRanges: res.data.skippedRanges,
+      byRoomType: res.data.byRoomType,
+    }
+  } catch (err: any) {
+    allotmentPlanError.value = err?.response?.data?.message || 'Could not preview the allotment batch (no inventory_allocation.db yet?)'
+  } finally {
+    allotmentPlanLoading.value = false
+  }
+}
+
+const upstreamStepsWillRecalculate = computed(() =>
+  stepEnabled.value.scrape_pms || stepEnabled.value.scrape_cm || stepEnabled.value.combine || stepEnabled.value.yield
+)
+
+function openStartConfirm() {
+  configError.value = ''
+  try {
+    pendingYieldConfig.value = buildYieldConfig()
   } catch (err: any) {
     configError.value = err instanceof Error ? err.message : 'Invalid yield configuration'
     return
   }
+  showStartConfirm.value = true
+  loadAllotmentPlanPreview()
+}
 
-  if (stepEnabled.value.allotment && !allotmentDryRun.value) {
-    const ok = window.confirm(
-      'This will push LIVE allotment changes to the PMS (Deluxe + Premiere) via the API. Continue?'
-    )
-    if (!ok) return
-  }
+async function confirmAndStartPipeline() {
+  showStartConfirm.value = false
+  const yieldConfig = pendingYieldConfig.value
+  if (!yieldConfig) return
 
   const barRoomTypes = Object.entries(barRooms.value).filter(([, v]) => v).map(([k]) => k)
 
@@ -460,6 +676,7 @@ async function startPipeline() {
       resetCheckpoint: resetCheckpoint.value,
       skipUnchanged: skipUnchanged.value,
       allotmentDryRun: allotmentDryRun.value,
+      allotmentRoomTypes: allotmentRoomTypes.value,
       allotmentConcurrency: allotmentConcurrency.value,
       companyId: companyId.value,
     }, '/api/fast-pipeline/stream')

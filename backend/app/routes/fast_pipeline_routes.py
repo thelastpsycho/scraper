@@ -54,6 +54,7 @@ def start_fast_pipeline():
         "yieldConfig": data["yieldConfig"],
         "steps": data.get("steps"),
         "barRooms": data.get("barRooms"),
+        "allotmentRoomTypes": data.get("allotmentRoomTypes"),
         "resetCheckpoint": data.get("resetCheckpoint") is True,
         "skipUnchanged": data.get("skipUnchanged", True) is not False,
         "allotmentDryRun": data.get("allotmentDryRun", True) is not False,
