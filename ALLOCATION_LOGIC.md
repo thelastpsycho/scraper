@@ -19,15 +19,21 @@ three. Actual room assignments have already been accounted for by the PMS.
 
 ## Capacity before sales
 
-For each date:
+For each date, the planner first determines its scope:
+
+- The default and production Deluxe/Premiere calculation manages only Deluxe Room and Premiere Room.
+- The all-category calculation adds the 11 simple room types when `include_simple_rooms: true`.
+- Negative balances and missing values outside the selected scope do not block the calculation.
+
+For each in-scope date:
 
 1. Validate finite, whole room counts (negative balances are allowed). Reject an
    incomplete combined snapshot instead of filling missing values with zero.
 2. Deduct configured operational buffers and active manual room holds from
    positive remaining capacity.
-3. Match existing negative balances to eligible upgrade destinations. Deluxe can
-   use Premiere first and, if configured, continue through Premiere's upgrade
-   routes. Positive Deluxe inventory never covers Premiere by default.
+3. Match existing negative balances to eligible upgrade destinations in the hotel
+   tier order below, restricted to categories managed by this calculation.
+   Positive Deluxe inventory never covers Premiere.
 4. Use integral flow to avoid double counting a destination. Configured route
    order is the preference; rerouting is allowed to accommodate a more
    constrained source. These are virtual capacity reserves, not room assignments.
@@ -48,12 +54,19 @@ All yield entry points load the same JSON policy at runtime:
 
 - Default: `backend/app/scraper/data/allocation_policy.json` (local, gitignored).
 - Alternative: set `ALLOCATION_POLICY_PATH` to a JSON file.
-- If absent, the only default routes are Deluxe Room → Premiere Room and
-  Deluxe Suite Room → Premiere Suite Room, matching existing relationships.
-- **Premiere has no assumed higher-category destination. Configure its routes
-  before using all-category allocation on dates with a Premiere shortage.**
+- If absent, defaults follow the hotel tier order, trying the nearest eligible higher category first:
+  Deluxe → Deluxe Pool Access → Premiere → Premiere Lagoon Access → Family Premiere →
+  Deluxe Suite → Premiere Suite → Anvaya Suite No Pool → Anvaya Suite Whirlpool →
+  Beach Front Private Suite → Anvaya Suite Private Pool → Anvaya Residence → Anvaya Villa.
+- **Beach Front Private Suite cannot upgrade anywhere.**
+- **Premiere Lagoon Access can upgrade only to Anvaya Suite Whirlpool, then Beach Front Private Suite.**
+- Villa has no higher destination. All other sources may use any higher tier.
 - An explicit empty destination list disables a route. Unspecified sources retain
-  their defaults. Unknown rooms, cycles, duplicates and invalid counts are rejected.
+  their defaults. Custom routes may narrow/reorder eligible destinations but cannot
+  bypass the tier order or category restrictions. Unknown rooms, duplicates and
+  invalid counts are rejected.
+- Database names remain unchanged: `The Anvaya Suite Whirpool` means Whirlpool,
+  and `The Anvaya Suite With Pool` means Private Pool.
 
 Illustrative configuration (choose actual routes according to hotel policy):
 
@@ -79,10 +92,10 @@ Illustrative configuration (choose actual routes according to hotel policy):
 }
 ```
 
-Destination lists are ordered and transitive: Deluxe → Premiere → Suite permits
-Deluxe to use Suite when necessary. Only configure operationally valid upgrades;
-the engine cannot infer bedding, accessibility, family capacity or promised
-amenities. No other suite, family, villa or pool-access route is assumed.
+Destination lists are explicit and ordered, **not transitive**. Lagoon → Whirlpool
+never grants Lagoon access to Whirlpool's other destinations. Defaults enumerate
+all eligible higher categories, so skipping a sold-out tier requires no chaining.
+The engine cannot infer bedding, accessibility, family capacity or promised amenities.
 
 Buffers apply every night. Holds apply on each date from start through end,
 inclusive. Overlapping held room counts add together; overlapping `max_online`
@@ -134,9 +147,11 @@ zero. Global Allocation Status and Unresolved Upgrade Rooms explain blocked date
 The Yield management category selector displays these explanations. Exports
 include all result columns. Select **Calculate allocations for all room
 categories** to include higher-category online targets in custom yield output.
-Default `/api/yield` already includes all categories. `/api/custom-yield` accepts
+`/api/custom-yield` accepts
 `include_simple_rooms: true`; omitted/false keeps Deluxe/Premiere-only output for
-compatibility with existing automated pipelines. Diagnostics are always included.
+compatibility with existing automated pipelines. The existing `/api/yield` path also
+uses Deluxe/Premiere-only scope. All-category calculation is available through the custom endpoint.
+Diagnostics are always included.
 
 Calculation alone does not change PMS/D-EDGE availability. Existing update tools
 publish only their selected category scope. The automated pipelines still push

@@ -98,7 +98,7 @@ def should_override_deluxe(occupancy, premiere_inventory, deluxe_inventory,
             (occupancy < occupancy_threshold or premiere_inventory > premiere_threshold))
 
 # Load and clean the dataset
-def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
+def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None, required_room_types=None):
     # Use default values if not provided
     demand_bins = demand_bins or DEMAND_BINS
     demand_labels = demand_labels or DEMAND_LABELS
@@ -144,18 +144,31 @@ def load_and_clean_data(db_path=None, demand_bins=None, demand_labels=None):
         if old_name in data.columns:
             data = data.rename(columns={old_name: new_name})
     
-    relevant_columns = ['Date', 'Deluxe Room', 'Premiere Room', 'Occupancy'] + SIMPLE_ROOM_TYPES
-    missing_columns = [col for col in relevant_columns if col not in data.columns]
+    all_inventory_columns = ['Deluxe Room', 'Premiere Room'] + SIMPLE_ROOM_TYPES
+    required_room_types = required_room_types or all_inventory_columns
+    missing_columns = [col for col in required_room_types if col not in data.columns]
     if missing_columns:
         print(f"Error: Missing required columns: {missing_columns}")
         print("Available columns:", data.columns.tolist())
         return None
 
-    data = data[relevant_columns]
+    # Keep a stable schema for downstream diagnostics, while allowing a
+    # Deluxe/Premiere-only calculation to proceed when an unrelated category
+    # is absent from a partial snapshot.
+    for col in all_inventory_columns:
+        if col not in data.columns:
+            data[col] = 0
+    data = data[['Date', 'Deluxe Room', 'Premiere Room', 'Occupancy'] + SIMPLE_ROOM_TYPES]
 
-    inventory_columns = ['Deluxe Room', 'Premiere Room'] + SIMPLE_ROOM_TYPES
-    if data.isnull().any().any():
-        raise ValueError('Incomplete inventory snapshot: refresh both PMS and CM before calculating allocation')
+    inventory_columns = all_inventory_columns
+    required_columns = ['Occupancy'] + required_room_types
+    if data[required_columns].isnull().any().any():
+        raise ValueError('Incomplete inventory snapshot for the selected allocation scope: refresh PMS and CM before calculating allocation')
+    # Nulls outside the requested scope are irrelevant to this run. Keep the
+    # output schema usable, but do not let them abort Deluxe/Premiere allocation.
+    outside_scope = [col for col in inventory_columns if col not in required_room_types]
+    for col in outside_scope:
+        data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
     
     try:
         data['Date'] = pd.to_datetime(data['Date'])
@@ -211,6 +224,9 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
     low_threshold_pct = low_threshold_pct or LOW_THRESHOLD_PCT
     room_caps = {**ROOM_CAPS, **(room_caps or {})}
     policy = load_policy(ROOM_CAPS, allocation_policy)
+    allocation_scope = ['Deluxe Room', 'Premiere Room']
+    if include_simple_rooms:
+        allocation_scope += SIMPLE_ROOM_TYPES
     # Whole ranks to shift the base BAR matrix toward the more expensive tier
     # (negative shifts toward cheaper), applied before scarcity escalation.
     bar_level_shift = int(bar_level_shift) if bar_level_shift else 0
@@ -362,9 +378,9 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
 
         # Rebuild capacity from the current snapshot. PMS assignments have
         # already restored the booked type and deducted the physical destination.
-        remaining_by_room = {room: row[room] for room in ROOM_CAPS}
+        remaining_by_room = {room: row[room] for room in allocation_scope}
         safe, reserved, protected, online_caps, unresolved = prepare_capacity(
-            remaining_by_room, policy, row['Date'].strftime('%Y-%m-%d'))
+            remaining_by_room, policy, row['Date'].strftime('%Y-%m-%d'), room_scope=allocation_scope)
         override_reserves = dict.fromkeys(ROOM_CAPS, 0)
         allocations = dict.fromkeys(ROOM_CAPS, 0)
         if not unresolved:
@@ -407,10 +423,10 @@ def apply_yield_matrix(data, very_low_threshold_pct=None, low_threshold_pct=None
             data.at[idx, 'Allocation Status'] = 'Blocked: upgrade capacity or routes insufficient'
         data.at[idx, 'Unresolved Upgrade Rooms'] = unresolved
         for room_type in ROOM_CAPS:
-            data.at[idx, f'{room_type} Upgrade Reserve'] = reserved[room_type]
-            data.at[idx, f'{room_type} Override Reserve'] = override_reserves[room_type]
-            data.at[idx, f'{room_type} Operational Hold'] = protected[room_type]
-            data.at[idx, f'{room_type} Safe Inventory'] = safe[room_type]
+            data.at[idx, f'{room_type} Upgrade Reserve'] = reserved.get(room_type, 0)
+            data.at[idx, f'{room_type} Override Reserve'] = override_reserves.get(room_type, 0)
+            data.at[idx, f'{room_type} Operational Hold'] = protected.get(room_type, 0)
+            data.at[idx, f'{room_type} Safe Inventory'] = safe.get(room_type, 0)
             prefix = {'Deluxe Room': 'Deluxe', 'Premiere Room': 'Premiere'}.get(room_type, room_type)
             if room_type in ('Deluxe Room', 'Premiere Room') or include_simple_rooms:
                 data.at[idx, f'{prefix} Online Inventory'] = min(
@@ -434,18 +450,19 @@ def apply_custom_yield(config):
     if not os.path.exists(combined_db_path):
         raise FileNotFoundError("Combined inventory database not found. Please run combine inventory first.")
 
+    include_simple_rooms = config.get('include_simple_rooms', False)
+    if not isinstance(include_simple_rooms, bool):
+        raise ValueError('include_simple_rooms must be a boolean')
+    required_room_types = ['Deluxe Room', 'Premiere Room'] + (SIMPLE_ROOM_TYPES if include_simple_rooms else [])
     data = load_and_clean_data(
         demand_bins=config['demand_bins'],
-        demand_labels=config['demand_labels']
+        demand_labels=config['demand_labels'],
+        required_room_types=required_room_types
     )
     if data is None:
         raise RuntimeError("Failed to load and clean data")
 
     bar_level_shift = int(config.get('bar_level_shift', 0) or 0)
-
-    include_simple_rooms = config.get('include_simple_rooms', False)
-    if not isinstance(include_simple_rooms, bool):
-        raise ValueError('include_simple_rooms must be a boolean')
 
     result = apply_yield_matrix(
         data,
@@ -505,13 +522,13 @@ def apply_custom_yield(config):
 def main():
     try:
         print("Starting yield calculation process...")
-        data = load_and_clean_data()
+        data = load_and_clean_data(required_room_types=['Deluxe Room', 'Premiere Room'])
         if data is None:
             print("Error: Failed to load and clean data")
             return None
         
         print("Applying yield matrix...")
-        data = apply_yield_matrix(data)
+        data = apply_yield_matrix(data, include_simple_rooms=False)
         
         # Create a copy of the data with the correct column names
         output = data.copy()
@@ -525,8 +542,6 @@ def main():
 
         # Select and order the columns for output
         simple_room_columns = []
-        for room_type in SIMPLE_ROOM_TYPES:
-            simple_room_columns += [f'{room_type} Remaining Inventory', f'{room_type} Online Inventory']
 
         output = output[[
             'Date', 'DayOfWeek', 'Season', 'Occupancy', 'DemandLevel',

@@ -12,10 +12,26 @@ from datetime import date
 from ..infrastructure.paths import get_data_path
 
 
-DEFAULT_ROUTES = {
-    'Deluxe Room': ['Premiere Room'],
-    'Deluxe Suite Room': ['Premiere Suite Room'],
-}
+ROOM_TIERS = [
+    'Deluxe Room',
+    'Deluxe Pool Access',
+    'Premiere Room',
+    'Premiere Room Lagoon Access',
+    'Family Premiere Room',
+    'Deluxe Suite Room',
+    'Premiere Suite Room',
+    'The Anvaya Suite No Pool',
+    'The Anvaya Suite Whirpool',
+    'Beach Front Private Suite Room',
+    'The Anvaya Suite With Pool',
+    'The Anvaya Residence',
+    'The Anvaya Villa',
+]
+DEFAULT_ROUTES = {room: ROOM_TIERS[index + 1:] for index, room in enumerate(ROOM_TIERS)}
+DEFAULT_ROUTES['Beach Front Private Suite Room'] = []
+DEFAULT_ROUTES['Premiere Room Lagoon Access'] = [
+    'The Anvaya Suite Whirpool', 'Beach Front Private Suite Room',
+]
 
 
 def room_count(value, name, signed=False):
@@ -33,8 +49,8 @@ def room_count(value, name, signed=False):
 def load_policy(room_types, policy=None):
     """Runtime JSON is shared by default, custom and pipeline yield calculations.
 
-    Unspecified routes retain the two relationships already used in the engine.
-    No new higher-category route is assumed without an operator configuration.
+    Unspecified routes retain the hotel tier order and its two exceptions.
+    Explicit routes may narrow eligibility, but cannot bypass those rules.
     """
     if policy is None:
         path = os.environ.get('ALLOCATION_POLICY_PATH', get_data_path('allocation_policy.json'))
@@ -57,6 +73,8 @@ def load_policy(room_types, policy=None):
             raise ValueError(f'Unknown destination for {source}')
         if len(destinations) != len(set(destinations)):
             raise ValueError(f'Duplicate upgrade destination for {source}')
+        if any(dest not in DEFAULT_ROUTES[source] for dest in destinations):
+            raise ValueError(f'Upgrade route violates hotel tier or category restrictions: {source}')
         routes[source] = list(destinations)
 
     def visit(room, path):
@@ -95,15 +113,12 @@ def load_policy(room_types, policy=None):
 
 
 def destinations_for(source, routes):
-    """Ordered reachable upgrades; a Deluxe guest can move via Premiere upward."""
-    result = []
-    def walk(room):
-        for dest in routes.get(room, []):
-            if dest not in result:
-                result.append(dest)
-                walk(dest)
-    walk(source)
-    return result
+    """Explicit ordered destinations; never inherit another category's eligibility.
+
+    In particular Lagoon -> Whirlpool must not imply Lagoon -> Villa.
+    Defaults already enumerate every allowed higher category.
+    """
+    return list(routes.get(source, []))
 
 
 def reserve_shortages(shortages, capacity, routes):
@@ -153,19 +168,33 @@ def reserve_shortages(shortages, capacity, routes):
     return reserved, total - covered
 
 
-def prepare_capacity(remaining, policy, day):
-    remaining = {room: room_count(value, room, signed=True) for room, value in remaining.items()}
-    protected = {room: policy['buffers'].get(room, 0) for room in remaining}
+def prepare_capacity(remaining, policy, day, room_scope=None):
+    """Reserve only categories managed by this calculation.
+
+    A Deluxe/Premiere-only run must not be blocked by an unrelated negative
+    balance in a suite category that the caller did not ask this run to open.
+    """
+    scope = list(room_scope or remaining)
+    scope_set = set(scope)
+    remaining = {room: room_count(remaining[room], room, signed=True) for room in scope}
+    routes = {
+        source: [dest for dest in policy['routes'].get(source, []) if dest in scope_set]
+        for source in scope
+    }
+    scoped_policy = {**policy, 'routes': routes}
+    protected = {room: policy['buffers'].get(room, 0) for room in scope}
     online_caps = {}
     for hold in policy['holds']:
         if hold['start_date'] <= day <= hold['end_date']:
             room = hold['room_type']
+            if room not in scope_set:
+                continue
             protected[room] += hold['rooms']
             if 'max_online' in hold:
                 online_caps[room] = min(online_caps.get(room, hold['max_online']), hold['max_online'])
     capacity = {room: max(0, value - protected[room]) for room, value in remaining.items()}
     shortages = {room: -value for room, value in remaining.items() if value < 0}
-    reserved, unresolved = reserve_shortages(shortages, capacity, policy['routes'])
+    reserved, unresolved = reserve_shortages(shortages, capacity, scoped_policy['routes'])
     safe = {room: capacity[room] - reserved[room] for room in remaining}
     return safe, reserved, protected, online_caps, unresolved
 

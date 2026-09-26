@@ -12,7 +12,7 @@ P = 'Premiere Room'
 S = 'Premiere Suite Room'
 L = 'Premiere Room Lagoon Access'
 DS = 'Deluxe Suite Room'
-POLICY = {'routes': {P: [L, S]}}
+POLICY = {'routes': {D: [P, L, S], DS: [S], P: [L, S]}}
 
 
 def snapshot(values, occupancy=90):
@@ -88,7 +88,7 @@ def test_configured_destination_order_is_used_when_capacity_allows():
     assert row[f'{S} Upgrade Reserve'] == 1
 
 
-@pytest.mark.parametrize('values,policy', [({P: -2, S: 8}, {}), ({P: -1000000, S: 8}, POLICY)])
+@pytest.mark.parametrize('values,policy', [({P: -2, S: 8}, {'routes': {P: []}}), ({P: -1000000, S: 8}, POLICY)])
 def test_uncovered_demand_is_visible_and_prevents_new_sales(values, policy):
     row = calculate(values, policy=policy)
     assert row['Unresolved Upgrade Rooms'] > 0
@@ -161,9 +161,12 @@ def test_custom_yield_persists_explanations_and_respects_room_scope(tmp_path, mo
     result = engine.apply_custom_yield(config(all_rooms))
     with sqlite3.connect(tmp_path / 'inventory_allocation.db') as conn:
         saved = pd.read_sql_query('SELECT * FROM daily_inventory_allocation', conn)
-    assert saved.loc[0, f'{S} Upgrade Reserve'] == 5
-    assert saved.loc[0, f'{S} Safe Inventory'] == 3
-    assert saved.loc[0, 'Allocation Status'] == 'Ready'
+    if all_rooms:
+        assert saved.loc[0, f'{S} Upgrade Reserve'] == 5
+        assert saved.loc[0, f'{S} Safe Inventory'] == 3
+    else:
+        assert saved.loc[0, f'{S} Upgrade Reserve'] == 0
+    assert saved.loc[0, 'Allocation Status'] == ('Ready' if all_rooms else 'Blocked: upgrade capacity or routes insufficient')
     assert (f'{S} Online Inventory' in result.columns) == all_rooms
     if all_rooms:
         assert saved.loc[0, f'{S} Online Inventory'] == 2
@@ -176,3 +179,79 @@ def test_missing_source_date_values_are_rejected(tmp_path):
         source.to_sql('combined_inventory', conn, index=False)
     with pytest.raises(ValueError, match='Incomplete inventory snapshot'):
         engine.load_and_clean_data(str(path))
+
+
+def test_unrelated_negative_category_does_not_block_deluxe_premiere_only_run():
+    row = calculate({D: 20, P: 20, 'The Anvaya Suite With Pool': -1}, policy={}, include_simple_rooms=False)
+    assert row['Allocation Status'] == 'Ready'
+    assert row['Deluxe Online Inventory'] > 0
+    assert row['Premiere Online Inventory'] > 0
+
+
+def test_null_outside_scope_is_ignored_for_deluxe_premiere_run(tmp_path):
+    source = snapshot({D: 20, P: 20, 'The Anvaya Suite With Pool': float('nan')}).drop(
+        columns=['Season', 'DemandLevel', 'DayOfWeek'])
+    path = tmp_path / 'combined.db'
+    with sqlite3.connect(path) as conn:
+        source.to_sql('combined_inventory', conn, index=False)
+    loaded = engine.load_and_clean_data(
+        str(path), required_room_types=[D, P])
+    assert loaded['The Anvaya Suite With Pool'].iloc[0] == 0
+
+
+@pytest.mark.parametrize('source', engine.ROOM_CAPS)
+def test_default_routes_follow_hotel_order_and_exceptions(source):
+    from app.revenue.upgrade_reserves import ROOM_TIERS
+    expected = ROOM_TIERS[ROOM_TIERS.index(source) + 1:]
+    if source == L:
+        expected = ['The Anvaya Suite Whirpool', 'Beach Front Private Suite Room']
+    elif source == 'Beach Front Private Suite Room':
+        expected = []
+    assert load_policy(engine.ROOM_CAPS, {})['routes'][source] == expected
+
+
+@pytest.mark.parametrize('source', [L, 'Beach Front Private Suite Room'])
+def test_restricted_categories_cannot_indirectly_upgrade_to_villa(source):
+    row = calculate({source: -1, 'The Anvaya Villa': 1}, policy={})
+    assert row['Unresolved Upgrade Rooms'] == 1
+    assert row['The Anvaya Villa Upgrade Reserve'] == 0
+
+
+@pytest.mark.parametrize('source,destination', [
+    (L, 'The Anvaya Villa'), ('Beach Front Private Suite Room', 'The Anvaya Residence'),
+    (P, 'Deluxe Pool Access'),
+])
+def test_custom_policy_cannot_bypass_hotel_restrictions(source, destination):
+    with pytest.raises(ValueError, match='restrictions'):
+        load_policy(engine.ROOM_CAPS, {'routes': {source: [destination]}})
+
+
+def test_deluxe_prefers_pool_access_before_premiere():
+    row = calculate({D: -2, 'Deluxe Pool Access': 1, P: 2}, policy={}, deluxe_override_amount=0)
+    assert row['Deluxe Pool Access Upgrade Reserve'] == 1
+    assert row[f'{P} Upgrade Reserve'] == 1
+
+
+def test_lagoon_uses_only_whirlpool_then_beach_front():
+    row = calculate({L: -3, 'The Anvaya Suite Whirpool': 2,
+                     'Beach Front Private Suite Room': 2, S: 8}, policy={})
+    assert row['The Anvaya Suite Whirpool Upgrade Reserve'] == 2
+    assert row['Beach Front Private Suite Room Upgrade Reserve'] == 1
+    assert row[f'{S} Upgrade Reserve'] == 0
+
+
+def test_default_yield_persists_only_deluxe_premiere_with_no_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine, 'DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('ALLOCATION_POLICY_PATH', str(tmp_path / 'absent.json'))
+    source = snapshot({D: 20, P: 20, 'The Anvaya Suite With Pool': -1,
+                       S: float('nan')}).drop(columns=['Season', 'DemandLevel', 'DayOfWeek'])
+    with sqlite3.connect(tmp_path / 'combined_inventory.db') as conn:
+        source.to_sql('combined_inventory', conn, index=False)
+    result = engine.main()
+    assert result is not None
+    with sqlite3.connect(tmp_path / 'inventory_allocation.db') as conn:
+        saved = pd.read_sql_query('SELECT * FROM daily_inventory_allocation', conn)
+    assert saved.loc[0, 'Allocation Status'] == 'Ready'
+    assert saved.loc[0, 'Deluxe Online Inventory'] > 0
+    assert saved.loc[0, 'Premiere Online Inventory'] > 0
+    assert not any(f'{room} Online Inventory' in saved.columns for room in engine.SIMPLE_ROOM_TYPES)
