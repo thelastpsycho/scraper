@@ -474,6 +474,7 @@ def trigger_update_allotment():
         room_type = data.get('room_type', 'deluxe')
         max_dates = data.get('max_dates')
         headless = data.get('headless')
+        skip_unchanged = data.get('skip_unchanged', True)
         # Falls back to PMS_USERNAME / PMS_PASSWORD env vars inside update_allotmet when omitted.
 
         if room_type not in ('deluxe', 'premiere'):
@@ -492,7 +493,7 @@ def trigger_update_allotment():
                 })
 
                 # Call the update function
-                result = update_allotmet(username=username, password=password, room_type=room_type, max_dates=max_dates, headless=headless)
+                result = update_allotmet(username=username, password=password, room_type=room_type, max_dates=max_dates, headless=headless, skip_unchanged=skip_unchanged)
 
                 if result:
                     log_queue.put({
@@ -559,6 +560,7 @@ def trigger_update_rest_allotment():
         password = data.get('password')
         max_dates = data.get('max_dates')
         headless = data.get('headless')
+        skip_unchanged = data.get('skip_unchanged', True)
 
         # Start update process in a separate thread
         def update_process():
@@ -568,7 +570,7 @@ def trigger_update_rest_allotment():
                     'message': 'Starting allotment update process for the rest of the room types...'
                 })
 
-                result = update_rest_allotment(username=username, password=password, max_dates=max_dates, headless=headless)
+                result = update_rest_allotment(username=username, password=password, max_dates=max_dates, headless=headless, skip_unchanged=skip_unchanged)
 
                 if result:
                     log_queue.put({

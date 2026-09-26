@@ -42,6 +42,27 @@
                   Stop
                 </button>
               </div>
+              <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500" title="Compares against the current channel-manager value and skips dates that already match, instead of always pushing every date.">
+                Skip unchanged dates
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="skipUnchanged"
+                  :disabled="isUpdating"
+                  @click="skipUnchanged = !skipUnchanged"
+                  :class="[
+                    'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full shadow-neu-inset-sm transition-colors disabled:opacity-50',
+                    skipUnchanged ? 'bg-app-accent' : 'bg-app-primary',
+                  ]"
+                >
+                  <span
+                    :class="[
+                      'inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-neu-sm transition-transform',
+                      skipUnchanged ? 'translate-x-[20px]' : 'translate-x-0.5',
+                    ]"
+                  />
+                </button>
+              </label>
               <label class="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
                 Run headless
                 <button
@@ -299,6 +320,7 @@ const username = ref('')
 const password = ref('')
 const maxDates = ref<number | null>(null)
 const headless = ref(false)
+const skipUnchanged = ref(true)
 // TODO: prefilled for convenience — move server-side before shipping (ships to
 // the browser and is committed to git).
 const dedgeUsername = ref('')
@@ -395,7 +417,8 @@ const triggerUpdate = async (roomType: 'deluxe' | 'premiere') => {
       password: password.value,
       room_type: roomType,
       max_dates: maxDates.value || null,
-      headless: headless.value
+      headless: headless.value,
+      skip_unchanged: skipUnchanged.value
     })
 
   } catch (error: any) {
@@ -445,7 +468,8 @@ const triggerUpdateRest = async () => {
       username: username.value,
       password: password.value,
       max_dates: maxDates.value || null,
-      headless: headless.value
+      headless: headless.value,
+      skip_unchanged: skipUnchanged.value
     })
 
   } catch (error: any) {

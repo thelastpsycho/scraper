@@ -13,6 +13,7 @@ import os
 from selenium.webdriver.common.keys import Keys
 from ...shared import log_queue, allotment_run_control
 from ...inventory.allocation_repository import load_allocation_rows
+from ...inventory.cm_repository import load_cm_current_values
 
 # Room types not covered by allotment_updater.py (Deluxe Room / Premiere Room).
 # Each maps to exactly one PMS checkbox value, verified live in the "Add Room" modal
@@ -21,18 +22,29 @@ from ...inventory.allocation_repository import load_allocation_rows
 # (see pms_processor.py), but - matching the existing Deluxe/Premiere precedent
 # of writing to only one representative code - are written to a single checkbox only
 # (DLTP / PRKL respectively), not both.
+# cm_column is the matching column name in cm_inventory_processed.db, used to
+# detect when a calculated value already matches the current channel-manager
+# value (see build_batches' skip_unchanged handling). 'The Anvaya Suite Whirpool'
+# reads from the CM column's raw, un-renamed spelling ("with Whirpool") since
+# inventory_combiner.py only renames it when building combined_inventory.db,
+# not in cm_inventory_processed. 'Deluxe Pool Access' was excluded from the
+# D-EDGE Planning "Rooms to show" filter (unticked there, so also absent from
+# the Excel export our scraper pulls) until 2026-09-24 - fixed by ticking it
+# in the D-EDGE extranet UI, not a code change. A cm_column of None still
+# means "no CM data to compare against" for any future room type that ends up
+# in the same situation - it's handled as always-push, never falsely skipped.
 REST_ROOM_TYPE_CONFIG = {
-    'Deluxe Suite Room': {'csv_column': 'Deluxe Suite Room Online Inventory', 'checkbox_value': 'DLS'},
-    'Family Premiere Room': {'csv_column': 'Family Premiere Room Online Inventory', 'checkbox_value': 'FAM'},
-    'Premiere Suite Room': {'csv_column': 'Premiere Suite Room Online Inventory', 'checkbox_value': 'PSU'},
-    'Beach Front Private Suite Room': {'csv_column': 'Beach Front Private Suite Room Online Inventory', 'checkbox_value': 'BFS'},
-    'The Anvaya Suite Whirpool': {'csv_column': 'The Anvaya Suite Whirpool Online Inventory', 'checkbox_value': 'ASW'},
-    'The Anvaya Suite No Pool': {'csv_column': 'The Anvaya Suite No Pool Online Inventory', 'checkbox_value': 'AVS'},
-    'The Anvaya Suite With Pool': {'csv_column': 'The Anvaya Suite With Pool Online Inventory', 'checkbox_value': 'ASP'},
-    'The Anvaya Residence': {'csv_column': 'The Anvaya Residence Online Inventory', 'checkbox_value': 'AVR'},
-    'The Anvaya Villa': {'csv_column': 'The Anvaya Villa Online Inventory', 'checkbox_value': 'AVP'},
-    'Deluxe Pool Access': {'csv_column': 'Deluxe Pool Access Online Inventory', 'checkbox_value': 'DLTP'},
-    'Premiere Room Lagoon Access': {'csv_column': 'Premiere Room Lagoon Access Online Inventory', 'checkbox_value': 'PRKL'},
+    'Deluxe Suite Room': {'csv_column': 'Deluxe Suite Room Online Inventory', 'checkbox_value': 'DLS', 'cm_column': 'Deluxe Suite Room'},
+    'Family Premiere Room': {'csv_column': 'Family Premiere Room Online Inventory', 'checkbox_value': 'FAM', 'cm_column': 'Family Premiere Room'},
+    'Premiere Suite Room': {'csv_column': 'Premiere Suite Room Online Inventory', 'checkbox_value': 'PSU', 'cm_column': 'Premiere Suite Room'},
+    'Beach Front Private Suite Room': {'csv_column': 'Beach Front Private Suite Room Online Inventory', 'checkbox_value': 'BFS', 'cm_column': 'Beach Front Private Suite Room'},
+    'The Anvaya Suite Whirpool': {'csv_column': 'The Anvaya Suite Whirpool Online Inventory', 'checkbox_value': 'ASW', 'cm_column': 'The Anvaya Suite with Whirpool'},
+    'The Anvaya Suite No Pool': {'csv_column': 'The Anvaya Suite No Pool Online Inventory', 'checkbox_value': 'AVS', 'cm_column': 'The Anvaya Suite No Pool'},
+    'The Anvaya Suite With Pool': {'csv_column': 'The Anvaya Suite With Pool Online Inventory', 'checkbox_value': 'ASP', 'cm_column': 'The Anvaya Suite With Pool'},
+    'The Anvaya Residence': {'csv_column': 'The Anvaya Residence Online Inventory', 'checkbox_value': 'AVR', 'cm_column': 'The Anvaya Residence'},
+    'The Anvaya Villa': {'csv_column': 'The Anvaya Villa Online Inventory', 'checkbox_value': 'AVP', 'cm_column': 'The Anvaya Villa'},
+    'Deluxe Pool Access': {'csv_column': 'Deluxe Pool Access Online Inventory', 'checkbox_value': 'DLTP', 'cm_column': 'Deluxe Pool Access'},
+    'Premiere Room Lagoon Access': {'csv_column': 'Premiere Room Lagoon Access Online Inventory', 'checkbox_value': 'PRKL', 'cm_column': 'Premiere Room Lagoon Access'},
 }
 
 MAX_DATE_RANGES_PER_SAVE = 5
@@ -269,48 +281,62 @@ def handle_sweet_alert(driver, timeout=10):
         return False
 
 
-def build_batches(allocation_rows):
+def build_batches(allocation_rows, skip_unchanged=True):
     """
     Read the daily allocation rows and produce a flat list of batch jobs
     that push all 11 REST_ROOM_TYPE_CONFIG room types to the PMS with as few
     "Add Room" modal submissions as possible.
 
     Each batch job is a dict: {'date_ranges': [(start, end), ...], 'checkbox_values': [...], 'number_of_rooms': int}
+    Returns (batches, skipped_run_count).
 
     Algorithm:
-    1. Per room type, collapse consecutive equal-value days into contiguous (start, end, value) runs.
-    2. Group runs that share the exact same (start, end, value) across room types -
+    1. Per room type, collapse consecutive days that share both the same value AND
+       the same skip_unchanged status into contiguous (start, end, value) runs. Splitting
+       runs on skip status (not just value) matters because a saved range applies its
+       value to every day within it - a day we mean to skip must never get bridged into
+       a submitted range just because its neighbor happens to share the same target value.
+    2. Drop runs whose value already matches the current channel-manager value
+       (cm_inventory_processed.db) when skip_unchanged is True - no PMS update needed for those.
+    3. Group remaining runs that share the exact same (start, end, value) across room types -
        these can be checked together in a single Save (this is what fires whenever the
        Occupancy >= 95 override in yield_engine.py zeroes all 11 room types on the same days).
-    3. Re-key by (frozenset(room_types), value) so separate date windows sharing the same
+    4. Re-key by (frozenset(room_types), value) so separate date windows sharing the same
        room-type set and value can be packed as multiple ranges in one modal too.
-    4. Chunk each group's date ranges into batches of up to MAX_DATE_RANGES_PER_SAVE.
+    5. Chunk each group's date ranges into batches of up to MAX_DATE_RANGES_PER_SAVE.
     """
+    cm_values = load_cm_current_values() if skip_unchanged else {}
     rows = []
     for row in allocation_rows:
         date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
         rows.append({
             'date': date_obj.strftime('%m/%d/%Y'),
+            'cm_date': row['Date'],
             **{room_type: int(row[config['csv_column']]) for room_type, config in REST_ROOM_TYPE_CONFIG.items()}
         })
 
-    # Step 1: per-room-type contiguous runs
+    # Step 1: per-room-type contiguous runs, split on both value and skip status
     runs_by_room_type = {}
-    for room_type in REST_ROOM_TYPE_CONFIG:
+    skipped_run_count = 0
+    for room_type, config in REST_ROOM_TYPE_CONFIG.items():
+        cm_column = config.get('cm_column')
         runs = []
         current_run = None
         for row in rows:
             value = row[room_type]
+            cm_current = cm_values.get(row['cm_date'], {}).get(cm_column) if cm_column else None
+            skip = skip_unchanged and cm_column is not None and cm_current is not None and int(cm_current) == value
             if current_run is None:
-                current_run = {'start': row['date'], 'end': row['date'], 'value': value}
-            elif value == current_run['value']:
+                current_run = {'start': row['date'], 'end': row['date'], 'value': value, 'skip': skip}
+            elif value == current_run['value'] and skip == current_run['skip']:
                 current_run['end'] = row['date']
             else:
                 runs.append(current_run)
-                current_run = {'start': row['date'], 'end': row['date'], 'value': value}
+                current_run = {'start': row['date'], 'end': row['date'], 'value': value, 'skip': skip}
         if current_run is not None:
             runs.append(current_run)
-        runs_by_room_type[room_type] = runs
+        runs_by_room_type[room_type] = [r for r in runs if not r['skip']]
+        skipped_run_count += sum(1 for r in runs if r['skip'])
 
     # Step 2: group by exact (start, end, value) across room types
     exact_groups = {}
@@ -338,16 +364,17 @@ def build_batches(allocation_rows):
                 'date_ranges': chunk,
             })
 
-    return batches
+    return batches, skipped_run_count
 
 
-def update_rest_allotment(driver=None, username=None, password=None, max_dates=None, headless=None):
+def update_rest_allotment(driver=None, username=None, password=None, max_dates=None, headless=None, skip_unchanged=True):
     """
     Login to the website, select the hotel brand, and push online-inventory allotment
     for all 11 REST_ROOM_TYPE_CONFIG room types (everything except Deluxe/Premiere,
     which are handled separately by allotment_updater.py).
 
     max_dates: if set, only process the first N dates worth of batches (for testing).
+    skip_unchanged: skip date ranges that already match the current CM value (default True).
     Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
     """
     username = username or os.environ.get("PMS_USERNAME", "")
@@ -503,10 +530,13 @@ def update_rest_allotment(driver=None, username=None, password=None, max_dates=N
 
         log(driver, "Reading allocation data and building batches...")
         try:
-            batches = build_batches(load_allocation_rows())
+            batches, skipped_run_count = build_batches(load_allocation_rows(), skip_unchanged=skip_unchanged)
         except Exception as e:
             log(driver, f"Error reading allocation data: {str(e)}")
             raise
+
+        if skipped_run_count:
+            log(driver, f"Skipping {skipped_run_count} date range(s) already matching the current CM value - no PMS update needed")
 
         if max_dates:
             batches = batches[:max_dates]

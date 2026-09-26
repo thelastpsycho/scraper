@@ -13,6 +13,7 @@ import os
 from selenium.webdriver.common.keys import Keys
 from ...shared import log_queue, allotment_run_control
 from ...inventory.allocation_repository import load_allocation_rows
+from ...inventory.cm_repository import load_cm_current_values
 from ...infrastructure.paths import get_data_dir
 
 def wait_for_toast_disappear(driver, timeout=10):
@@ -289,8 +290,8 @@ def check_stop_and_pause(driver):
         raise Exception("Update stopped by user")
 
 ROOM_TYPE_CONFIG = {
-    "deluxe": {"csv_column": "Deluxe Online Inventory", "checkbox_value": "DLT", "label": "Deluxe"},
-    "premiere": {"csv_column": "Premiere Online Inventory", "checkbox_value": "PRKG", "label": "Premiere"},
+    "deluxe": {"csv_column": "Deluxe Online Inventory", "checkbox_value": "DLT", "label": "Deluxe", "cm_column": "Deluxe Room"},
+    "premiere": {"csv_column": "Premiere Online Inventory", "checkbox_value": "PRKG", "label": "Premiere", "cm_column": "Premiere Room"},
 }
 
 def _login_and_prepare(driver, username, password):
@@ -473,24 +474,64 @@ def _login_and_prepare(driver, username, password):
     log(driver, "Successfully navigated to allotment detail page")
 
 
-def _process_room_type(driver, room_type, max_dates=None):
+def _build_date_ranges(date_inventory):
+    """Collapse a date-ordered list of {'date', 'inventory', 'skip'} dicts into
+    contiguous (start, end, inventory) runs, dropping runs flagged 'skip'.
+
+    A new run starts whenever either the inventory value or the skip status
+    changes between consecutive days. Splitting on skip status (not just
+    value) is required: a saved range applies its value to every day within
+    it, so a day meant to be skipped must never get bridged into a submitted
+    range just because a neighboring day happens to share the same value.
+
+    Returns (kept_runs, skipped_run_count).
+    """
+    runs = []
+    current_run = None
+    for item in date_inventory:
+        if current_run is None:
+            current_run = {'start': item['date'], 'end': item['date'], 'inventory': item['inventory'], 'skip': item['skip']}
+        elif item['inventory'] == current_run['inventory'] and item['skip'] == current_run['skip']:
+            current_run['end'] = item['date']
+        else:
+            runs.append(current_run)
+            current_run = {'start': item['date'], 'end': item['date'], 'inventory': item['inventory'], 'skip': item['skip']}
+    if current_run is not None:
+        runs.append(current_run)
+
+    skipped_run_count = sum(1 for r in runs if r['skip'])
+    kept_runs = [r for r in runs if not r['skip']]
+    return kept_runs, skipped_run_count
+
+
+def _process_room_type(driver, room_type, max_dates=None, skip_unchanged=True):
     """Push allotment changes for one room type. Assumes the driver is
     already on the allotment detail page (i.e. _login_and_prepare already
     ran in this session). Returns True on success, False on failure - does
     not raise, matching update_allotmet's original contract.
+
+    skip_unchanged: when True (default), date ranges whose calculated value
+    already matches the current channel-manager value are dropped before any
+    PMS submission, avoiding a Selenium round-trip for a no-op change.
     """
     room_config = ROOM_TYPE_CONFIG[room_type]
+    cm_column = room_config.get('cm_column')
     try:
         # Read and process allocation data
         log(driver, "Reading allocation data...")
+        cm_values = load_cm_current_values() if skip_unchanged and cm_column else {}
         date_inventory = []
         try:
             for row in load_allocation_rows():
+                inventory = int(row[room_config['csv_column']])
+                cm_current = cm_values.get(row['Date'], {}).get(cm_column) if cm_column else None
+                is_unchanged = skip_unchanged and cm_column is not None and cm_current is not None and int(cm_current) == inventory
                 date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
                 formatted_date = date_obj.strftime('%m/%d/%Y')
                 date_inventory.append({
                     'date': formatted_date,
-                    'inventory': int(row[room_config['csv_column']])
+                    'inventory': inventory,
+                    'skip': is_unchanged,
                 })
             log(driver, f"Successfully read {len(date_inventory)} dates from allocation DB")
             if max_dates:
@@ -500,21 +541,11 @@ def _process_room_type(driver, room_type, max_dates=None):
             log(driver, f"Error reading allocation data: {str(e)}")
             raise
 
-        # Collapse consecutive same-inventory days into contiguous date ranges
         log(driver, "Building contiguous date ranges...")
-        runs = []
-        current_run = None
-        for item in date_inventory:
-            if current_run is None:
-                current_run = {'start': item['date'], 'end': item['date'], 'inventory': item['inventory']}
-            elif item['inventory'] == current_run['inventory']:
-                current_run['end'] = item['date']
-            else:
-                runs.append(current_run)
-                current_run = {'start': item['date'], 'end': item['date'], 'inventory': item['inventory']}
-        if current_run is not None:
-            runs.append(current_run)
-        log(driver, f"Collapsed {len(date_inventory)} days into {len(runs)} contiguous date ranges")
+        runs, skipped_run_count = _build_date_ranges(date_inventory)
+        log(driver, f"Collapsed {len(date_inventory)} days into {len(runs) + skipped_run_count} contiguous date ranges")
+        if skipped_run_count:
+            log(driver, f"Skipping {skipped_run_count} date range(s) already matching the current CM value - no PMS update needed")
 
         # Bucket ranges by inventory value (preserving first-seen order) so that
         # same-value ranges from different points in the calendar can share a save
@@ -637,7 +668,7 @@ def _process_room_type(driver, room_type, max_dates=None):
         return False
 
 
-def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe", headless=None):
+def update_allotmet(driver=None, username=None, password=None, max_dates=None, room_type="deluxe", headless=None, skip_unchanged=True):
     """
     Login to the website, select the hotel brand, and push allotment changes
     for a single room type. Returns True if successful, False otherwise.
@@ -645,6 +676,7 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
     max_dates: if set, only process the first N dates from the allocation DB (for testing).
     room_type: "deluxe" or "premiere" - which column/room-type checkbox to update.
     headless: run Chrome headless (None -> honour the SELENIUM_HEADLESS env var).
+    skip_unchanged: skip date ranges that already match the current CM value (default True).
     Credentials fall back to the PMS_USERNAME / PMS_PASSWORD env vars when not passed.
     """
     username = username or os.environ.get("PMS_USERNAME", "")
@@ -656,11 +688,11 @@ def update_allotmet(driver=None, username=None, password=None, max_dates=None, r
     except Exception as e:
         log(driver, f"An error occurred: {str(e)}")
         return False
-    return _process_room_type(driver, room_type, max_dates=max_dates)
+    return _process_room_type(driver, room_type, max_dates=max_dates, skip_unchanged=skip_unchanged)
 
 
 def update_allotment_multi(driver=None, username=None, password=None, max_dates=None,
-                            room_types=("deluxe", "premiere"), headless=None):
+                            room_types=("deluxe", "premiere"), headless=None, skip_unchanged=True):
     """Login once and push allotment changes for multiple room types in the
     same browser session, without navigating back to the login page between
     them. update_allotmet() re-runs the full login/brand/hotel/menu flow on
@@ -668,6 +700,8 @@ def update_allotment_multi(driver=None, username=None, password=None, max_dates=
     to back - and re-navigating to the site root while already authenticated
     can land the second run somewhere the login form doesn't expect, causing
     it to fail. Returns True only if every room type succeeds.
+
+    skip_unchanged: skip date ranges that already match the current CM value (default True).
     """
     username = username or os.environ.get("PMS_USERNAME", "")
     password = password or os.environ.get("PMS_PASSWORD", "")
@@ -682,7 +716,7 @@ def update_allotment_multi(driver=None, username=None, password=None, max_dates=
     for room_type in room_types:
         label = ROOM_TYPE_CONFIG[room_type]['label']
         log(driver, f"--- Updating {label} allotment (same session) ---")
-        if not _process_room_type(driver, room_type, max_dates=max_dates):
+        if not _process_room_type(driver, room_type, max_dates=max_dates, skip_unchanged=skip_unchanged):
             log(driver, f"{label} allotment update failed - stopping before remaining room types")
             return False
     return True

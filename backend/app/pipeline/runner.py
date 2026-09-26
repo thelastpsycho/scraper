@@ -300,7 +300,7 @@ def run_pipeline(config):
             # update_allotment_multi's docstring).
             if not update_allotment_multi(driver=pms_driver, username=config["pmsUsername"],
                                            password=config["pmsPassword"], room_types=allotment_room_types,
-                                           headless=headless):
+                                           headless=headless, skip_unchanged=config.get("skipUnchanged", True)):
                 raise PipelineStepError("allotment", "Allotment update failed (see log above)")
             pms_driver.quit()
             pms_driver = None

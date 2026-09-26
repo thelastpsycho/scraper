@@ -83,6 +83,9 @@
               <label class="inline-flex cursor-pointer items-center gap-1">
                 <input type="checkbox" v-model="allotmentRooms.premiere" :disabled="isRunning" class="h-3 w-3 accent-app-accent" /> Premiere
               </label>
+              <label class="inline-flex cursor-pointer items-center gap-1" title="Compares against the current channel-manager value and skips dates that already match, instead of always pushing every date.">
+                <input type="checkbox" v-model="skipUnchanged" :disabled="isRunning" class="h-3 w-3 accent-app-accent" /> Skip unchanged dates
+              </label>
             </div>
             <div v-if="stepEnabled.bar" class="flex items-center gap-2">
               <span class="font-semibold text-slate-600">BAR rooms:</span>
@@ -309,6 +312,7 @@ function toggleStep(id: string) {
 const allotmentRooms = ref({ deluxe: true, premiere: true })
 const barRooms = ref({ deluxe: true, premiere: true })
 const resetCheckpoint = ref(false)
+const skipUnchanged = ref(true)
 
 const pmsUsername = ref('')
 const pmsPassword = ref('')
@@ -440,6 +444,7 @@ async function startPipeline() {
       allotmentRoomTypes,
       barRooms: barRoomTypes,
       resetCheckpoint: resetCheckpoint.value,
+      skipUnchanged: skipUnchanged.value,
     })
   } catch {
     // overallError is already surfaced reactively by the composable
