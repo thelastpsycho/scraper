@@ -363,7 +363,7 @@ def run_pipeline(config):
                     plan["jobs"],
                     company_id=config.get("companyId", 1001),
                     dry_run=allotment_dry_run,
-                    max_workers=config.get("allotmentConcurrency", 8),
+                    max_workers=config.get("allotmentConcurrency", 4),
                     username=config["pmsUsername"], password=config["pmsPassword"],
                     on_result=_on_job_result,
                     on_retry=_on_retry,

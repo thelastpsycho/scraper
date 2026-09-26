@@ -420,7 +420,7 @@ function toggleStep(id: string) {
 }
 
 const allotmentDryRun = ref(true)
-const allotmentConcurrency = ref(8)
+const allotmentConcurrency = ref(4)
 const companyId = ref(1001)
 const barRooms = ref({ deluxe: true, premiere: true })
 const resetCheckpoint = ref(false)

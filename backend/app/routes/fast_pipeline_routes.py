@@ -58,7 +58,7 @@ def start_fast_pipeline():
         "resetCheckpoint": data.get("resetCheckpoint") is True,
         "skipUnchanged": data.get("skipUnchanged", True) is not False,
         "allotmentDryRun": data.get("allotmentDryRun", True) is not False,
-        "allotmentConcurrency": data.get("allotmentConcurrency", 8),
+        "allotmentConcurrency": data.get("allotmentConcurrency", 4),
         "companyId": data.get("companyId", 1001),
     }
     thread = threading.Thread(target=fast_runner.run_pipeline, args=(config,))

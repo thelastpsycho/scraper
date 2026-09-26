@@ -204,7 +204,7 @@ def build_full_plan(room_types=None, max_dates=None, skip_unchanged=True):
     return plan
 
 
-def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=8, username=None, password=None,
+def push_jobs_concurrent(jobs, company_id=1001, dry_run=True, max_workers=4, username=None, password=None,
                           on_result=None, on_retry=None, max_retries=2, retry_delay=3.0):
     """Fire one PMS login, then push every job concurrently (bounded by
     max_workers). dry_run=True builds every payload without sending it.

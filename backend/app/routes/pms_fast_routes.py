@@ -146,7 +146,7 @@ def allotment_bulk_push():
     dry_run = data.get('dryRun', True) is not False
     try:
         company_id = int(data.get('companyId', 1001))
-        max_concurrency = int(data.get('maxConcurrency', 8))
+        max_concurrency = int(data.get('maxConcurrency', 4))
     except (TypeError, ValueError):
         return jsonify({"status": "error", "message": "companyId/maxConcurrency must be numbers"}), 400
 
