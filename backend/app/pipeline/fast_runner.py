@@ -1,0 +1,376 @@
+"""API-based counterpart to pipeline/runner.py.
+
+Runs the same seven-stage workflow, but the two PMS stages go through the
+Selenium-free JSON API client (integrations/pms/fast_inventory_scraper.py,
+fast_allotment_updater.py) instead of driving Chrome through the PMS UI. The
+two D-EDGE stages (scrape_cm, bar) still use Selenium - no D-EDGE API was
+reverse-engineered, so those stages are unchanged from runner.py.
+
+Verify/step-emission/log-forwarding logic is duplicated from runner.py rather
+than imported, so this module doesn't have to route progress messages through
+runner.py's queue/globals to stay standalone (same rationale documented in
+fast_allotment_updater.py for duplicating _build_date_ranges).
+
+The allotment stage is intentionally fixed to Deluxe + Premiere only, matching
+what runner.py's automated pipeline covers today - the other 11 room types
+remain a separate manual action (other_room_allotment_updater.py /
+/api/update-rest-allotment), unchanged.
+"""
+
+import os
+import sqlite3
+import sys
+import threading
+import time
+import queue
+from datetime import datetime
+from io import StringIO
+
+import pandas as pd
+
+from ..shared import log_queue, allotment_run_control
+from ..integrations.pms.fast_inventory_scraper import fetch_room_inventory
+from ..integrations.pms.fast_allotment_updater import build_full_plan, push_jobs_concurrent
+from ..inventory.pms_processor import process_pms_inventory
+from ..integrations.dedge.inventory_scraper import scrape_cm_inventory
+from ..inventory.inventory_combiner import combine_inventory_files
+from ..revenue.yield_engine import apply_custom_yield
+from ..integrations.dedge.bar_updater import update_bar, setup_driver as dedge_setup_driver, DEFAULT_PROFILE_DIR
+from ..routes.database_routes import get_db_path
+from ..infrastructure.paths import get_data_dir
+from . import runner as selenium_pipeline_runner
+
+STEPS = [
+    {"id": "scrape_pms", "label": "Scrape PMS inventory (API)"},
+    {"id": "scrape_cm", "label": "Scrape Channel Manager (D-EDGE)"},
+    {"id": "combine", "label": "Combine inventory"},
+    {"id": "yield", "label": "Calculate yield (Deluxe/Premiere)"},
+    {"id": "verify", "label": "Verify data"},
+    {"id": "allotment", "label": "Push Deluxe + Premiere allotment (PMS API)"},
+    {"id": "bar", "label": "Update BAR pricing (D-EDGE)"},
+]
+STEP_IDS = [s["id"] for s in STEPS]
+STEP_LABELS = {s["id"]: s["label"] for s in STEPS}
+
+pipeline_queue = queue.Queue()
+pipeline_active = False
+pipeline_error = None
+pipeline_current_step = None
+_lock = threading.Lock()
+
+# Raw table column dtypes, matching integrations/pms/inventory_scraper.py's
+# dtype_dict exactly, so pms_inventory_raw.db stays byte-compatible regardless
+# of which scraper wrote it (InventoryDataView's "raw" tab reads this table).
+_PMS_NUMERIC_COLUMNS = [
+    'DLK', 'DLT', 'DLKP', 'DLTP', 'PRKG', 'PRKP', 'PRTG', 'PRTP', 'PRKL', 'PRTL',
+    'Extra Bed', 'Total Room', 'Available', 'Tentative', 'Definite', 'Waiting List',
+    'Allotment', 'Out of Order', 'Occupancy',
+]
+_PMS_RAW_DTYPE = {
+    'Date': 'DATE', 'AVR': 'INTEGER', 'AVS': 'INTEGER', 'ASP': 'INTEGER', 'ASW': 'INTEGER',
+    'AVP': 'INTEGER', 'BFS': 'INTEGER', 'DLK': 'INTEGER', 'DLT': 'INTEGER', 'DLKP': 'INTEGER',
+    'DLTP': 'INTEGER', 'DLS': 'INTEGER', 'FAM': 'INTEGER', 'PRKG': 'INTEGER', 'PRKP': 'INTEGER',
+    'PRTG': 'INTEGER', 'PRTP': 'INTEGER', 'PRKL': 'INTEGER', 'PRTL': 'INTEGER', 'PSU': 'INTEGER',
+    'Extra Bed': 'INTEGER', 'Total Room': 'INTEGER', 'Available': 'INTEGER', 'Tentative': 'INTEGER',
+    'Definite': 'INTEGER', 'Waiting List': 'INTEGER', 'Allotment': 'INTEGER', 'Out of Order': 'INTEGER',
+}
+
+
+class PipelineStepError(Exception):
+    """Raised to stop the pipeline, tagging which step failed."""
+    def __init__(self, step, message):
+        super().__init__(message)
+        self.step = step
+
+
+def try_acquire():
+    """Atomic check-and-set so two racing 'start pipeline' requests can't both
+    proceed. Also refuses to start while the Selenium pipeline (runner.py) is
+    active, since scrape_cm/bar drive the same D-EDGE Chrome profile and
+    running both at once would race for it. This is a one-directional check -
+    it doesn't stop the Selenium pipeline from starting while this one is
+    running - since guarding that direction too would require editing
+    runner.py."""
+    global pipeline_active
+    with _lock:
+        if pipeline_active:
+            return False, "A fast pipeline run is already in progress"
+        if selenium_pipeline_runner.pipeline_active:
+            return False, "The Selenium pipeline is already running - wait for it to finish first"
+        pipeline_active = True
+        return True, None
+
+
+def _emit(step, type_, message):
+    pipeline_queue.put({"step": step, "type": type_, "message": message})
+
+
+def _begin_step(step_id):
+    global pipeline_current_step
+    if allotment_run_control.stop_event.is_set():
+        raise PipelineStepError(step_id, "Pipeline stopped by user before this step started")
+    pipeline_current_step = step_id
+    idx = STEP_IDS.index(step_id) + 1
+    _emit(step_id, "info", f"Step {idx}/{len(STEPS)}: {STEP_LABELS[step_id]} - starting")
+
+
+def _log_forwarder(step_ref, stop_flag):
+    while True:
+        try:
+            msg = log_queue.get(timeout=0.2)
+        except queue.Empty:
+            if stop_flag.is_set():
+                return
+            continue
+        if msg is None:
+            continue
+        msg = dict(msg)
+        msg["step"] = step_ref[0]
+        pipeline_queue.put(msg)
+
+
+def _capture_prints(step_id, fn):
+    class _Capture(StringIO):
+        def write(self, text):
+            if text.strip():
+                _emit(step_id, "info", text.strip())
+            return len(text)
+
+    old_stdout = sys.stdout
+    sys.stdout = _Capture()
+    try:
+        return fn()
+    finally:
+        sys.stdout = old_stdout
+
+
+def _count_and_range(db_path, table):
+    conn = sqlite3.connect(db_path)
+    try:
+        count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        lo, hi = conn.execute(f"SELECT MIN(Date), MAX(Date) FROM {table}").fetchone()
+        dates = {row[0] for row in conn.execute(f"SELECT DISTINCT Date FROM {table}")}
+    finally:
+        conn.close()
+    return count, lo, hi, dates
+
+
+_FILE_OWNER_STEP = {
+    "pms_inventory_processed.db": "scrape_pms",
+    "cm_inventory_processed.db": "scrape_cm",
+    "combined_inventory.db": "combine",
+    "inventory_allocation.db": "yield",
+}
+
+
+def _run_verify_step(pipeline_start_time, enabled_steps):
+    for fname in ("pms_inventory_processed.db", "cm_inventory_processed.db",
+                  "combined_inventory.db", "inventory_allocation.db"):
+        path = get_db_path(fname)
+        if not os.path.exists(path):
+            raise PipelineStepError("verify", f"{fname} does not exist")
+        owner_step = _FILE_OWNER_STEP[fname]
+        if not enabled_steps.get(owner_step, True):
+            _emit("verify", "info", f"{fname}: {owner_step} was skipped this run - not checking freshness")
+            continue
+        mtime = os.path.getmtime(path)
+        if mtime < pipeline_start_time - 5:
+            raise PipelineStepError("verify", f"{fname} was not updated by this pipeline run (stale)")
+        _emit("verify", "info", f"{fname}: fresh ({datetime.fromtimestamp(mtime).isoformat()})")
+
+    pms_n, pms_lo, pms_hi, pms_dates = _count_and_range(get_db_path("pms_inventory_processed.db"), "pms_inventory_processed")
+    cm_n, cm_lo, cm_hi, cm_dates = _count_and_range(get_db_path("cm_inventory_processed.db"), "cm_inventory_processed")
+    comb_n, comb_lo, comb_hi, comb_dates = _count_and_range(get_db_path("combined_inventory.db"), "combined_inventory")
+    alloc_n, alloc_lo, alloc_hi, alloc_dates = _count_and_range(get_db_path("inventory_allocation.db"), "daily_inventory_allocation")
+
+    for name, n in [("PMS", pms_n), ("CM", cm_n), ("Combined", comb_n), ("Allocation", alloc_n)]:
+        if n == 0:
+            raise PipelineStepError("verify", f"{name} table has 0 rows")
+    _emit("verify", "info", f"Row counts - PMS {pms_n}, CM {cm_n}, Combined {comb_n}, Allocation {alloc_n}")
+
+    if comb_n < max(pms_n, cm_n):
+        raise PipelineStepError("verify", f"Combined ({comb_n}) is smaller than a source (PMS {pms_n}, CM {cm_n})")
+    if alloc_n != comb_n:
+        raise PipelineStepError("verify", f"Allocation row count ({alloc_n}) != combined row count ({comb_n})")
+
+    union = pms_dates | cm_dates
+    overlap_pct = (len(pms_dates & cm_dates) / len(union) * 100) if union else 0
+    _emit("verify", "info", f"PMS {pms_lo}..{pms_hi}, CM {cm_lo}..{cm_hi}, date overlap {overlap_pct:.1f}%")
+    if overlap_pct < 90:
+        raise PipelineStepError(
+            "verify",
+            f"PMS/CM date ranges only overlap {overlap_pct:.1f}% "
+            f"(PMS {pms_lo}..{pms_hi}, CM {cm_lo}..{cm_hi}) - check both scrapers used the same start date"
+        )
+    if comb_lo != min(pms_lo, cm_lo) or comb_hi != max(pms_hi, cm_hi):
+        raise PipelineStepError("verify", f"Combined range ({comb_lo}..{comb_hi}) isn't the expected PMS union CM union")
+    if alloc_lo != comb_lo or alloc_hi != comb_hi:
+        raise PipelineStepError("verify", f"Allocation range ({alloc_lo}..{alloc_hi}) != combined range ({comb_lo}..{comb_hi})")
+
+
+def _scrape_and_process_pms(start_date, username, password):
+    """Fetch room availability via the PMS JSON API (100 days, matching the
+    Selenium scraper's hardcoded window), write it to pms_inventory_raw.db in
+    the same shape the Selenium scraper produces, then run it through the
+    unmodified production process_pms_inventory() to write
+    pms_inventory_processed.db."""
+    rows, elapsed = fetch_room_inventory(start_date, days=100, username=username, password=password)
+    if not rows:
+        raise PipelineStepError("scrape_pms", "PMS API returned no rows")
+
+    df = pd.DataFrame(rows)
+    for col in _PMS_NUMERIC_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    data_dir = get_data_dir()
+    raw_db_path = os.path.join(data_dir, 'pms_inventory_raw.db')
+    conn = sqlite3.connect(raw_db_path)
+    try:
+        df.to_sql('pms_inventory', conn, if_exists='replace', index=False, dtype=_PMS_RAW_DTYPE)
+    finally:
+        conn.close()
+
+    processed = process_pms_inventory(df)
+    if processed is None:
+        raise PipelineStepError("scrape_pms", "PMS processing failed (see log above)")
+    return processed, elapsed
+
+
+def run_pipeline(config):
+    """Runs the enabled steps sequentially in a background thread. Expects
+    pipeline_active already True (set by try_acquire() before this thread was
+    started). Always restarts clean from step 1 - no resume state is kept.
+
+    config["steps"]: optional dict of step id -> bool, same shape as
+    runner.py's config["steps"].
+    config["barRooms"]: optional list of "deluxe"/"premiere" narrowing the BAR
+    step; an empty list is equivalent to skipping it. The allotment step is
+    always Deluxe + Premiere (not narrowable) - see module docstring.
+    config["allotmentDryRun"]: default True - builds every allotment payload
+    without sending it. Must be explicitly set False to push live.
+    """
+    global pipeline_error, pipeline_current_step, pipeline_active
+    pipeline_error = None
+    pipeline_start_time = time.time()
+    allotment_run_control.reset()
+
+    enabled = {s["id"]: (config.get("steps") or {}).get(s["id"], True) for s in STEPS}
+    bar_rooms = tuple(config.get("barRooms") or ("deluxe", "premiere"))
+    allotment_dry_run = config.get("allotmentDryRun", True) is not False
+
+    step_ref = [None]
+    stop_flag = threading.Event()
+    forwarder = threading.Thread(target=_log_forwarder, args=(step_ref, stop_flag), daemon=True)
+    forwarder.start()
+
+    def begin(step_id):
+        step_ref[0] = step_id
+        _begin_step(step_id)
+
+    def skip(step_id, reason="Skipped by user"):
+        idx = STEP_IDS.index(step_id) + 1
+        _emit(step_id, "skipped", f"Step {idx}/{len(STEPS)}: {STEP_LABELS[step_id]} - {reason}")
+
+    dedge_driver = None
+    try:
+        headless = config.get("headless")
+
+        if enabled["scrape_pms"]:
+            begin("scrape_pms")
+            _emit("scrape_pms", "info", "Fetching PMS room availability via API (no browser)...")
+            processed, elapsed = _scrape_and_process_pms(config["startDate"], config["pmsUsername"], config["pmsPassword"])
+            _emit("scrape_pms", "success", f"PMS inventory scraped and processed via API in {elapsed:.2f}s ({len(processed)} rows)")
+        else:
+            skip("scrape_pms")
+
+        def ensure_dedge_driver():
+            nonlocal dedge_driver
+            if dedge_driver is None:
+                _emit(step_ref[0], "info", f"Launching Chrome for D-EDGE (headless={bool(headless)})...")
+                dedge_driver = dedge_setup_driver(DEFAULT_PROFILE_DIR, headless=headless)
+            return dedge_driver
+
+        if enabled["scrape_cm"]:
+            begin("scrape_cm")
+            ensure_dedge_driver()
+            cm_result = scrape_cm_inventory(
+                driver=dedge_driver, start_date=config["startDate"],
+                username=config["dedgeUsername"], password=config["dedgePassword"],
+                headless=headless)
+            _emit("scrape_cm", "success", cm_result or "CM inventory processing completed successfully")
+        else:
+            skip("scrape_cm")
+
+        if enabled["combine"]:
+            begin("combine")
+            combined = _capture_prints("combine", combine_inventory_files)
+            if combined is None:
+                raise PipelineStepError("combine", "combine_inventory_files() returned no data")
+            _emit("combine", "success", f"Combined inventory: {len(combined)} rows")
+        else:
+            skip("combine")
+
+        if enabled["yield"]:
+            begin("yield")
+            yielded = _capture_prints("yield", lambda: apply_custom_yield(config["yieldConfig"]))
+            _emit("yield", "success", f"Yield calculated: {len(yielded)} rows written")
+        else:
+            skip("yield")
+
+        if enabled["verify"]:
+            begin("verify")
+            _run_verify_step(pipeline_start_time, enabled)
+            _emit("verify", "success", "All verification checks passed")
+        else:
+            skip("verify")
+
+        if enabled["allotment"]:
+            begin("allotment")
+            plan = build_full_plan(room_types=["deluxe", "premiere"], skip_unchanged=config.get("skipUnchanged", True))
+            if not plan["jobs"]:
+                _emit("allotment", "success", f"Nothing to push - {plan['skipped_ranges']} range(s) already match the channel manager")
+            else:
+                _emit("allotment", "info", f"{len(plan['jobs'])} job(s) planned, {plan['skipped_ranges']} range(s) skipped (already matches CM)")
+                result = push_jobs_concurrent(
+                    plan["jobs"],
+                    company_id=config.get("companyId", 1001),
+                    dry_run=allotment_dry_run,
+                    max_workers=config.get("allotmentConcurrency", 8),
+                    username=config["pmsUsername"], password=config["pmsPassword"],
+                )
+                mode = "dry run" if allotment_dry_run else "LIVE"
+                if not allotment_dry_run and result["failed_count"] > 0:
+                    raise PipelineStepError("allotment", f"{result['failed_count']} of {result['total']} allotment push(es) failed")
+                _emit("allotment", "success", f"Allotment ({mode}): {result['success_count']}/{result['total']} succeeded in {result['elapsed_seconds']:.2f}s")
+        else:
+            skip("allotment")
+
+        if enabled["bar"] and bar_rooms:
+            begin("bar")
+            ensure_dedge_driver()
+            if not update_bar(driver=dedge_driver, username=config["dedgeUsername"],
+                               password=config["dedgePassword"], rooms=bar_rooms, headless=headless,
+                               reset_checkpoint=config.get("resetCheckpoint", False)):
+                raise PipelineStepError("bar", "BAR price-level update failed (see log above)")
+            _emit("bar", "success", f"BAR pricing updated successfully ({', '.join(bar_rooms)})")
+        else:
+            skip("bar", "No room types selected" if enabled["bar"] else "Skipped by user")
+
+        _emit(None, "success", "Pipeline completed successfully")
+
+    except Exception as e:
+        pipeline_error = str(e)
+        step = getattr(e, "step", pipeline_current_step)
+        _emit(step, "error", str(e))
+        _emit(None, "error", f"Pipeline stopped: {e}")
+
+    finally:
+        # dedge_driver is deliberately NOT quit here - it uses the persistent
+        # D-EDGE profile so leaving it open preserves the trusted-device
+        # session for next time, matching runner.py's convention.
+        stop_flag.set()
+        forwarder.join(timeout=5)
+        pipeline_current_step = None
+        pipeline_active = False
+        pipeline_queue.put(None)

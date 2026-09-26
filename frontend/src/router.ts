@@ -6,6 +6,8 @@ import InventoryDataView from './views/InventoryDataView.vue'
 import AllotmentManagementView from './views/AllotmentManagementView.vue'
 import BarPricingView from './views/BarPricingView.vue'
 import AutomationPipelineView from './views/AutomationPipelineView.vue'
+import PmsApiTestView from './views/PmsApiTestView.vue'
+import FastApiPipelineView from './views/FastApiPipelineView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -44,6 +46,16 @@ const router = createRouter({
       path: '/pipeline',
       name: 'pipeline',
       component: AutomationPipelineView
+    },
+    {
+      path: '/pms-api-test',
+      name: 'pms-api-test',
+      component: PmsApiTestView
+    },
+    {
+      path: '/fast-api-pipeline',
+      name: 'fast-api-pipeline',
+      component: FastApiPipelineView
     }
   ]
 })

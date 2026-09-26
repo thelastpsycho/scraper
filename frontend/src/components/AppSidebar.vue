@@ -84,6 +84,8 @@ import {
   ChartBarSquareIcon,
   ReceiptPercentIcon,
   RocketLaunchIcon,
+  BeakerIcon,
+  BoltIcon,
 } from '@heroicons/vue/24/outline'
 
 defineProps<{ open: boolean }>()
@@ -99,5 +101,7 @@ const navigation = [
   { name: 'Allotment', href: '/allotment', icon: ArchiveBoxIcon },
   { name: 'BAR Calculator', href: '/bar-calculator', icon: ReceiptPercentIcon },
   { name: 'Pipeline', href: '/pipeline', icon: RocketLaunchIcon },
+  { name: 'Fast API Pipeline', href: '/fast-api-pipeline', icon: BoltIcon },
+  { name: 'PMS API Test', href: '/pms-api-test', icon: BeakerIcon },
 ]
 </script>

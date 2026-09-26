@@ -1,0 +1,96 @@
+"""Routes for the API-based pipeline (pipeline/fast_runner.py). Kept separate
+from routes/pipeline_routes.py so the existing Selenium pipeline and its route
+handlers are never touched by this work."""
+
+from flask import Blueprint, jsonify, Response, request, stream_with_context
+import threading
+import json
+
+from ..pipeline import fast_runner
+
+bp = Blueprint('fast_pipeline', __name__)
+
+
+@bp.route('/api/fast-pipeline/steps', methods=['GET'])
+def get_fast_pipeline_steps():
+    return jsonify({"status": "success", "steps": fast_runner.STEPS})
+
+
+@bp.route('/api/fast-pipeline/status', methods=['GET'])
+def fast_pipeline_status():
+    return jsonify({
+        "status": "success",
+        "active": fast_runner.pipeline_active,
+        "current_step": fast_runner.pipeline_current_step,
+        "error": fast_runner.pipeline_error,
+    })
+
+
+@bp.route('/api/fast-pipeline/start', methods=['POST'])
+def start_fast_pipeline():
+    data = request.get_json(silent=True) or {}
+    required = ['startDate', 'yieldConfig']
+    missing = [k for k in required if not data.get(k)]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing required field(s): {', '.join(missing)}"}), 400
+
+    acquired, reason = fast_runner.try_acquire()
+    if not acquired:
+        return jsonify({"status": "error", "message": reason}), 409
+
+    while not fast_runner.pipeline_queue.empty():
+        try:
+            fast_runner.pipeline_queue.get_nowait()
+        except Exception:
+            break
+
+    config = {
+        "pmsUsername": data.get("pmsUsername"),
+        "pmsPassword": data.get("pmsPassword"),
+        "dedgeUsername": data.get("dedgeUsername"),
+        "dedgePassword": data.get("dedgePassword"),
+        "startDate": data["startDate"],
+        "headless": data.get("headless"),
+        "yieldConfig": data["yieldConfig"],
+        "steps": data.get("steps"),
+        "barRooms": data.get("barRooms"),
+        "resetCheckpoint": data.get("resetCheckpoint") is True,
+        "skipUnchanged": data.get("skipUnchanged", True) is not False,
+        "allotmentDryRun": data.get("allotmentDryRun", True) is not False,
+        "allotmentConcurrency": data.get("allotmentConcurrency", 8),
+        "companyId": data.get("companyId", 1001),
+    }
+    thread = threading.Thread(target=fast_runner.run_pipeline, args=(config,))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"status": "success", "message": "Fast pipeline started"})
+
+
+@bp.route('/api/fast-pipeline/stream')
+def stream_fast_pipeline_logs():
+    def generate():
+        while True:
+            msg = fast_runner.pipeline_queue.get()
+            if msg is None:
+                break
+            yield f"data: {json.dumps(msg)}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+
+@bp.route('/api/fast-pipeline/stop', methods=['POST'])
+def stop_fast_pipeline():
+    """Best-effort: interrupts between steps only. The allotment step's
+    concurrent push has no mid-batch stop check (see fast_allotment_updater.py) -
+    once it starts it runs to completion."""
+    fast_runner.allotment_run_control.stop_event.set()
+    return jsonify({"status": "success", "message": "Stop requested (best-effort - see route docstring for exact limits)"})
