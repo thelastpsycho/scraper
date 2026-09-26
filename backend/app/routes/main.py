@@ -398,7 +398,7 @@ def trigger_custom_yield():
         config['bar_level_shift'] = bar_level_shift
         try:
             result = apply_custom_yield(config)
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             return jsonify({
                 "status": "error",
                 "message": str(e)

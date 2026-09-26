@@ -1,109 +1,181 @@
-# Allocation Logic (`backend/app/revenue/yield_engine.py`)
+# Allocation logic
 
-How the yield engine decides **how many rooms to open online** ("allocation") for each
-date and each room type. Allocation is computed per-date, per-room-type from the
-*remaining inventory*, plus contextual signals like occupancy and season.
+The yield engine calculates a plan per date from `combined_inventory.db`.
+`upgrade_reserves.py` reserves capacity before `yield_engine.py` applies online
+release rules. BAR pricing still uses the existing matrix, raw remaining counts,
+seasonal limits and configured BAR shift.
 
-## 0. Preconditions per row
+## PMS assignment behavior
 
-For each date row (`apply_yield_matrix`, loop at `yield_engine.py`):
+An unassigned booking consumes its booked category, even when that category is
+negative. Assigning a Premiere booking to a suite room number restores one
+Premiere and consumes one suite. Therefore, **only negative balances in the
+current snapshot need virtual upgrade reserves**. Recalculate from scratch on
+every run; do not accumulate a separate history of upgrade deductions.
 
-- Skip the row if `DemandLevel` is `NaN` (occupancy fell outside the demand bins).
-- Pull `premiere_remaining` and `deluxe_remaining` from the combined inventory.
+Example: Premiere -5 / Suite 8 requires five suite reserves, leaving three.
+After one assignment, Premiere -4 / Suite 7 requires four reserves, still leaving
+three. Actual room assignments have already been accounted for by the PMS.
 
-`DemandLevel` comes from `Occupancy` binned via `DEMAND_BINS = [0, 70, 85, 100]`
-→ `Low / Medium / High` (`yield_engine.py`, `yield_engine.py`).
+## Capacity before sales
 
-## 1. The base allotment rule — tiered buckets
+For each date, the planner first determines its scope:
 
-`get_online_allotment(remaining, room_cap)` (`yield_engine.py`) is the workhorse.
-It maps remaining inventory into fixed buckets, then clamps to both the remaining
-count and the room cap:
+- The default and production Deluxe/Premiere calculation manages only Deluxe Room and Premiere Room.
+- The all-category calculation adds the 11 simple room types when `include_simple_rooms: true`.
+- Negative balances and missing values outside the selected scope do not block the calculation.
 
-| Remaining | Rooms opened online       |
-|-----------|---------------------------|
-| ≤ 0       | 0                         |
-| 1–5       | `min(2, remaining, cap)`  |
-| 6–10      | `min(5, remaining, cap)`  |
-| 11–50     | `min(10, remaining, cap)` |
-| > 50      | `min(30, remaining, cap)` |
+For each in-scope date:
 
-Intent: never dump all remaining rooms online at once — release them in
-controlled chunks that scale with how much is left.
+1. Validate finite, whole room counts (negative balances are allowed). Reject an
+   incomplete combined snapshot instead of filling missing values with zero.
+2. Deduct configured operational buffers and active manual room holds from
+   positive remaining capacity.
+3. Match existing negative balances to eligible upgrade destinations in the hotel
+   tier order below, restricted to categories managed by this calculation.
+   Positive Deluxe inventory never covers Premiere.
+4. Use integral flow to avoid double counting a destination. Configured route
+   order is the preference; rerouting is allowed to accommodate a more
+   constrained source. These are virtual capacity reserves, not room assignments.
+5. If any shortage cannot be covered, mark the date blocked, show the unresolved
+   count, and propose zero online rooms for every category included in the run.
+   This can mean missing upgrade routes, insufficient inventory, or held capacity.
+6. Reserve destination capacity for new override sales before direct sales.
+7. Apply the release rules to residual capacity, then clamp to manual online caps.
 
-## 2. Premiere Room
+**There is no 97% (or other hotel-occupancy) blanket closure for higher categories.**
+They can remain open at 97%, 99% or 100% when capacity supports the allocation.
+Occupancy still drives BAR demand bands and the existing Deluxe override trigger.
+Occupancy outside the configured demand bins is rejected rather than silently skipped.
 
-`allocation = get_online_allotment(effective_premiere_remaining, cap=260)` where
-`effective_premiere_remaining = premiere_remaining + min(deluxe_remaining, 0)`
-(`yield_engine.py`). A Deluxe oversell (negative remaining) will be upgraded into
-Premiere and so consumes real Premiere availability; a Deluxe surplus (positive)
-does *not* add to Premiere, because there is no Premiere→Deluxe downgrade. So
-once Deluxe+Premiere combined drops to ≤ 0, Premiere's effective remaining is ≤ 0
-and it opens 0 — instead of the old behavior of still opening 30 off a raw
-`premiere_remaining > 50`. (A BAR rate is also computed off the raw
-`premiere_remaining`, but that's pricing, not allocation.)
+## Configuring upgrade routes and holds
 
-## 3. Deluxe Room — with an override
+All yield entry points load the same JSON policy at runtime:
 
-Deluxe normally uses `get_online_allotment(deluxe_remaining, cap=160)`, **but**
-an override can force it open (`yield_engine.py`).
+- Default: `backend/app/scraper/data/allocation_policy.json` (local, gitignored).
+- Alternative: set `ALLOCATION_POLICY_PATH` to a JSON file.
+- If absent, defaults follow the hotel tier order, trying the nearest eligible higher category first:
+  Deluxe → Deluxe Pool Access → Premiere → Premiere Lagoon Access → Family Premiere →
+  Deluxe Suite → Premiere Suite → Anvaya Suite No Pool → Anvaya Suite Whirlpool →
+  Beach Front Private Suite → Anvaya Suite Private Pool → Anvaya Residence → Anvaya Villa.
+- **Beach Front Private Suite cannot upgrade anywhere.**
+- **Premiere Lagoon Access can upgrade only to Anvaya Suite Whirlpool, then Beach Front Private Suite.**
+- Villa has no higher destination. All other sources may use any higher tier.
+- An explicit empty destination list disables a route. Unspecified sources retain
+  their defaults. Custom routes may narrow/reorder eligible destinations but cannot
+  bypass the tier order or category restrictions. Unknown rooms, duplicates and
+  invalid counts are rejected.
+- Database names remain unchanged: `The Anvaya Suite Whirpool` means Whirlpool,
+  and `The Anvaya Suite With Pool` means Private Pool.
 
-`should_override_deluxe` (`yield_engine.py`) returns true when:
+Illustrative configuration (choose actual routes according to hotel policy):
 
-- `deluxe_inventory < 1` (Deluxe is effectively sold out), **AND**
-- `deluxe_inventory + premiere_remaining > 0` (Deluxe+Premiere combined still
-  has rooms — a Deluxe oversell can be upgraded into Premiere, but only while
-  the two categories together have slack), **AND**
-- `occupancy < 70` **OR** `premiere_remaining > 61`
+```json
+{
+  "routes": {
+    "Deluxe Room": ["Premiere Room"],
+    "Premiere Room": ["Premiere Room Lagoon Access", "Premiere Suite Room"],
+    "Deluxe Suite Room": ["Premiere Suite Room"]
+  },
+  "buffers": {
+    "Premiere Suite Room": 1
+  },
+  "holds": [
+    {
+      "room_type": "Beach Front Private Suite Room",
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-03",
+      "rooms": 2,
+      "max_online": 0
+    }
+  ]
+}
+```
 
-Meaning: if Deluxe is empty but either the hotel isn't full yet *or* there's
-still lots of Premiere sitting unsold — *and* the combined Deluxe+Premiere
-inventory hasn't hit zero — forcibly open up to **2** Deluxe rooms
-(`DELUXE_OVERRIDE_AMOUNT`, clamped to `deluxe_remaining + premiere_remaining`)
-anyway, to keep the cheaper category selling and capture demand rather than
-showing zero availability. Otherwise it falls back to the normal tiered rule.
+Destination lists are explicit and ordered, **not transitive**. Lagoon → Whirlpool
+never grants Lagoon access to Whirlpool's other destinations. Defaults enumerate
+all eligible higher categories, so skipping a sold-out tier requires no chaining.
+The engine cannot infer bedding, accessibility, family capacity or promised amenities.
 
-The combined-inventory guard is what stops the override from selling into a
-hole: if Deluxe is oversold at `-100` while Premiere has `100` left, the sum is
-`0`, so no override fires and Deluxe is written as `0`.
+Buffers apply every night. Holds apply on each date from start through end,
+inclusive. Overlapping held room counts add together; overlapping `max_online`
+limits use the lowest cap. A `rooms` hold excludes physical capacity from both
+upgrade reserves and sales. A `max_online: 0` lock prevents direct online sales
+but leaves the room eligible for upgrades. Holds must represent **extra** capacity
+to protect, not rooms already deducted by the PMS. Existing release-rule holdbacks
+still apply in addition to these configured buffers/holds.
 
-## 4. The 11 "simple" room types
+## Release rules after reserves
 
-These get an **online count only, no BAR pricing** (`yield_engine.py`).
-`SIMPLE_ROOM_TYPES` is every room in `ROOM_CAPS` except Deluxe/Premiere
-(`yield_engine.py`).
+| Safe remaining | Tiered online release |
+| --- | --- |
+| ≤ 0 | 0 |
+| 1–5 | min(2, remaining, room cap) |
+| 6–10 | min(5, remaining, room cap) |
+| 11–50 | min(10, remaining, room cap) |
+| > 50 | min(30, remaining, room cap) |
 
-**Global gate first:** if `Occupancy >= 95` (`NEAR_FULL_OCCUPANCY_THRESHOLD`),
-every simple room is closed (`allocation = 0`), regardless of its own rule.
-Otherwise each room follows its own formula:
+Deluxe and Premiere use the tiered release. The Deluxe override retains its
+existing trigger: raw Deluxe < 1, raw Deluxe + Premiere > 0, and occupancy < 70
+or raw Premiere > 31 (custom configurations may change those thresholds).
+It opens at most the configured amount (default 2), backed by unused Premiere
+capacity. Those rooms are deducted **before** Premiere's direct release.
+It does not introduce new Premiere override sales backed by higher categories.
 
-| Room type(s)                                                       | Rule                                            | Function                          |
-|-------------------------------------------------------------------|-------------------------------------------------|-----------------------------------|
-| Deluxe Pool Access, Premiere Room Lagoon Access, Premiere Suite Room | same tiered buckets as above                    | `get_online_allotment`            |
-| Deluxe Suite Room                                                  | stepped ladder (see below), Premiere-Suite fallback | `allot_deluxe_suite` (`:72`)      |
-| Beach Front Private Suite Room                                     | `remaining − 1`, but keep 1 open if only 1 left | `allot_minus_one_except_one` (`:62`) |
-| Family Premiere, Anvaya Suite Whirpool, Anvaya Suite No Pool       | `max(0, remaining − 1)` (always hold one back)  | `allot_minus_one` (`:59`)         |
-| Anvaya Suite With Pool, Anvaya Residence, Anvaya Villa             | open everything remaining                       | `allot_as_remaining` (`:69`)      |
+| Other category | Release from safe remaining |
+| --- | --- |
+| Deluxe Pool Access, Premiere Lagoon Access, Premiere Suite | Tiered release |
+| Deluxe Suite | ≥5 → 4; 4 → 3; 2–3 → 2; 1 → 1; otherwise 0 |
+| Beach Front Private Suite | remaining − 1, except release 1 if only 1 remains |
+| Family Premiere, Anvaya Suite Whirpool, Anvaya Suite No Pool | max(0, remaining − 1) |
+| Anvaya Suite With Pool, Residence, Villa | All safe remaining |
 
-**Deluxe Suite ladder** (`allot_deluxe_suite`, `yield_engine.py`):
+The existing Deluxe Suite fallback may offer one additional room when raw Deluxe
+Suite ≤ 0 and safe Premiere Suite > 3. It must reserve backing through configured
+Deluxe Suite routes before allocating direct higher-category sales. Existing
+Deluxe Suite oversells are accommodated first.
 
-- remaining ≥ 5 → 4
-- remaining == 4 → 3
-- remaining 2–3 → 2
-- remaining == 1 → 1
-- remaining ≤ 0 → 1 *only if* Premiere Suite has > 3 left, else 0
-  (borrow-a-sale fallback when its sibling category has slack)
+## Results and publishing scope
 
-## Summary of the design intent
+Each room has Remaining Inventory, Upgrade Reserve, Override Reserve, Operational
+Hold and Safe Inventory columns. Upgrade Reserve covers existing negative
+balances; Override Reserve covers proposed new borrowed sales. Safe Inventory is
+the residual before release rules and online caps. A blocked date can still show
+positive residual inventory in an ineligible category; its proposed sales remain
+zero. Global Allocation Status and Unresolved Upgrade Rooms explain blocked dates.
 
-1. **Meter releases in buckets** — the more remaining, the bigger the chunk, but
-   never all at once (`get_online_allotment`).
-2. **Hold back the scarce/premium types** — the small-inventory suites/villas
-   mostly do `remaining − 1` to avoid overselling a 1–4 room category.
-3. **Two override valves:**
-   - Deluxe: *force* rooms open when sold out but conditions say demand is
-     capturable (`should_override_deluxe`).
-   - Simple rooms: *force* everything shut once the hotel is ≥95% full.
-4. **Cross-category fallbacks** — Deluxe Suite and Deluxe Room both peek at their
-   Premiere sibling's remaining inventory to decide whether to open when they'd
-   otherwise be zero.
+The Yield management category selector displays these explanations. Exports
+include all result columns. Select **Calculate allocations for all room
+categories** to include higher-category online targets in custom yield output.
+`/api/custom-yield` accepts
+`include_simple_rooms: true`; omitted/false keeps Deluxe/Premiere-only output for
+compatibility with existing automated pipelines. The existing `/api/yield` path also
+uses Deluxe/Premiere-only scope. All-category calculation is available through the custom endpoint.
+Diagnostics are always included.
+
+Calculation alone does not change PMS/D-EDGE availability. Existing update tools
+publish only their selected category scope. The automated pipelines still push
+Deluxe/Premiere only; use the existing other-room updater for higher categories.
+A Deluxe/Premiere-only push cannot protect higher-category availability that is
+already live. Recalculate and review all affected categories together before
+publishing. This change does not make separate provider writes atomic; refresh
+source data, apply required reductions before dependent increases, and verify
+provider results. No live PMS/D-EDGE calls are needed to test this logic.
+
+## Source-data assumptions and limits
+
+The existing combiner adds PMS remaining availability and D-EDGE `Left for sale`.
+The CM processor must preserve the date column before numeric coercion; otherwise
+all CM dates can become `1970-01-01` and fail to align with PMS. The processor now
+protects that date column, and raw-file validation confirms the combined values
+equal PMS plus CM Left for sale for every room and date in the supplied snapshot.
+The provider accounting contract still needs operational verification: the addback
+is valid only if PMS availability excludes the unsold online allotment added back
+by the combiner.
+The supplied room-assignment behavior establishes how upgrades move inventory,
+but does not itself establish the allotment-addback contract.
+
+The planner works with daily category totals. It cannot guarantee one continuous
+room assignment across a multi-night stay, validate guest-specific requirements,
+or observe changes after the source snapshot. Those require reservation/room-level
+data and provider synchronization. A virtual reserve is a planning deduction only.

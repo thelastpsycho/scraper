@@ -37,9 +37,12 @@ def process_cm_inventory():
     df = df.reset_index()
     df = df.rename(columns={'index': 'Date'})
 
-    # Replace any non-numeric values with 0 except the ones in column Date
-    df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
-    df['Date'] = pd.to_datetime(df['Date'])
+    # Preserve Date before coercing the inventory values. Converting the whole
+    # frame first turns ISO date strings into NaN/0 (1970-01-01), which then
+    # prevents the CM rows from aligning with PMS dates during combination.
+    dates = pd.to_datetime(df['Date'], errors='raise')
+    values = df.drop(columns=['Date']).apply(pd.to_numeric, errors='coerce').fillna(0)
+    df = pd.concat([dates.rename('Date'), values], axis=1)
 
     # Convert date to YYYY-MM-DD format for consistency
     df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')

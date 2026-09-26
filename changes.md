@@ -1,5 +1,33 @@
 # changes.md
 
+## Upgrade-aware allocation — 2026-09-26
+
+- Rebuild upgrade reserves from current negative category balances. PMS room
+  assignments already restore the source and consume the destination, so assigned
+  upgrades are not deducted twice.
+- Add shared-capacity matching with configurable ordered routes, operational
+  buffers, date-specific held rooms and manual online caps. Default routes follow
+  the hotel's 13-tier order. Beach Front Suite is terminal; Lagoon can only use
+  Whirlpool or Beach Front. Explicit destinations prevent indirect bypasses.
+- Back new override offers with reserved destination capacity before direct online
+  releases, including the last-room Deluxe/Premiere double-selling case.
+- Remove the 97% occupancy blanket closure for all higher room categories.
+- Report uncovered shortages and propose zero sales for affected calculation dates.
+  Reject missing combined inventory and invalid counts rather than guessing capacity.
+- Limit shortage blocking and null validation to selected categories. Keep the
+  existing `/api/yield` calculation Deluxe/Premiere-only; all categories require
+  explicit custom-yield opt-in.
+- Preserve BAR pricing, existing release buckets, runtime filenames and pipeline
+  publishing scope. Custom yield can opt into all-category output.
+- Show per-category reserves, holds, residual inventory and proposed allocations;
+  export every result column. Document policy setup and source-data assumptions.
+- Add regressions for assignment invariance, shared capacity, configured upgrade
+  priority, manual holds, high occupancy, persisted custom-yield output, scoped
+  blocking and CM date alignment.
+
+Validation: 80 backend tests passed; frontend typecheck/production build passed.
+No live PMS/D-EDGE changes. See ALLOCATION_LOGIC.md for setup and daily-total limits.
+
 ## Phase 1 — Project structure cleanup
 
 Branch: `refactor/phase-1-project-structure`
