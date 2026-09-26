@@ -150,10 +150,13 @@ provider results. No live PMS/D-EDGE calls are needed to test this logic.
 ## Source-data assumptions and limits
 
 The existing combiner adds PMS remaining availability and D-EDGE `Left for sale`.
-This PR preserves that behavior. Code inspection confirms the addition but cannot
-prove the provider's accounting contract: it is valid only if PMS availability
-excludes the unsold online allotment added back by the combiner. Verify this with
-a same-date PMS/CM snapshot before relying on the resulting physical capacity.
+The CM processor must preserve the date column before numeric coercion; otherwise
+all CM dates can become `1970-01-01` and fail to align with PMS. The processor now
+protects that date column, and raw-file validation confirms the combined values
+equal PMS plus CM Left for sale for every room and date in the supplied snapshot.
+The provider accounting contract still needs operational verification: the addback
+is valid only if PMS availability excludes the unsold online allotment added back
+by the combiner.
 The supplied room-assignment behavior establishes how upgrades move inventory,
 but does not itself establish the allotment-addback contract.
 
