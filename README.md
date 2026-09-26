@@ -1,4 +1,4 @@
-# Hotel Inventory & Revenue Automation
+# Revenue Console
 
 Flask and Vue 3 application for PMS inventory scraping, D-EDGE inventory
 exports, yield/allotment calculations, and optional PMS/D-EDGE updates.

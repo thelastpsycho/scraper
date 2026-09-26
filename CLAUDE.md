@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## What this is
 
-A hotel inventory and revenue-automation tool. Selenium collects inventory from the hospitality PMS and D-EDGE, the backend normalizes and combines those datasets, a yield engine calculates online allocation/BAR decisions, and automation flows can push allotment and pricing changes back to the PMS and D-EDGE.
+**Revenue Console** — a hotel inventory and revenue-automation tool. Selenium (and, for the PMS side, a reverse-engineered JSON API) collects inventory from the hospitality PMS and D-EDGE, the backend normalizes and combines those datasets, a yield engine calculates online allocation/BAR decisions, and automation flows can push allotment and pricing changes back to the PMS and D-EDGE.
 
 - `backend/` — Flask API, data processing, Selenium integrations, and automation pipeline
 - `frontend/` — Vue 3 + TypeScript + Vite SPA
